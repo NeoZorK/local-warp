@@ -77,222 +77,413 @@ fn register_local_action_results(
     }
 }
 
-/// A native Warp response stream backed entirely by the local OptiQ server.
+/// Native Warp Agent Mode backed by local MLX OptiQ. This is a client-side
+/// agent loop: the stream stays open while Warp executes approved tools and their
+/// results are fed back to Qwen, rather than finishing after the first tool call.
 pub(crate) async fn generate_local_multi_agent_output(
     params: RequestParams,
-    _cancellation_rx: futures::channel::oneshot::Receiver<()>,
+    cancellation_rx: futures::channel::oneshot::Receiver<()>,
 ) -> ResponseStream {
-    let result = run_local_turn(params).await;
-    let events = match result {
-        Ok(events) => events.into_iter().map(Ok).collect::<Vec<Event>>(),
-        Err(error) => {
-            let error = Arc::new(AIApiError::Other(error));
-            vec![Err(error)]
-        }
-    };
-    Box::pin(stream::iter(events))
-}
+    let output = async_stream::stream! {
+        use futures::FutureExt as _;
 
-async fn run_local_turn(params: RequestParams) -> anyhow::Result<Vec<api::ResponseEvent>> {
-    anyhow::ensure!(
-        warp_core::telemetry::is_local_offline_mode(),
-        "The native local Agent backend must be launched with WARP_LOCAL_OFFLINE=1"
-    );
-    anyhow::ensure!(
-        matches!(params.session_context.session_type(), None | Some(SessionType::Local)),
-        "Local Qwen mode only supports local Warp sessions; switch away from a remote session."
-    );
+        let cancellation = cancellation_rx.fuse();
+        futures::pin_mut!(cancellation);
 
-    let base_url = local_base_url()?;
-    let client = http_client::Client::new_external();
-    let api_key = std::env::var("OPTIQ_API_KEY").ok().filter(|key| !key.trim().is_empty());
-    let model = model_id(&client, &base_url, api_key.as_deref()).await?;
+        let setup = (|| -> anyhow::Result<(String, String, String, String, String, String, bool)> {
+            anyhow::ensure!(
+                warp_core::telemetry::is_local_offline_mode(),
+                "The native local Agent backend must be launched with WARP_LOCAL_OFFLINE=1"
+            );
+            anyhow::ensure!(
+                matches!(params.session_context.session_type(), None | Some(SessionType::Local)),
+                "Local Qwen mode only supports local Warp sessions; switch away from a remote session."
+            );
 
-    let request_id = Uuid::new_v4().to_string();
-    let conversation_id = params
-        .conversation_token
-        .as_ref()
-        .map(|token| token.as_str().to_owned())
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let run_id = params
-        .ambient_agent_task_id
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_else(|| conversation_id.clone());
+            let base_url = local_base_url()?;
+            let request_id = Uuid::new_v4().to_string();
+            let conversation_id = params
+                .conversation_token
+                .as_ref()
+                .map(|token| token.as_str().to_owned())
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            let run_id = params
+                .ambient_agent_task_id
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| conversation_id.clone());
 
-    let root_task = params
-        .tasks
-        .iter()
-        .find(|task| task.dependencies.as_ref().is_none_or(|deps| deps.parent_task_id.is_empty()))
-        .or_else(|| params.tasks.first());
-    let task_id = root_task
-        .map(|task| task.id.clone())
-        .filter(|id| !id.is_empty())
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let create_root_task = !params.tasks.iter().any(|task| task.id == task_id);
+            let root_task = params
+                .tasks
+                .iter()
+                .find(|task| task.dependencies.as_ref().is_none_or(|deps| deps.parent_task_id.is_empty()))
+                .or_else(|| params.tasks.first());
+            let task_id = root_task
+                .map(|task| task.id.clone())
+                .filter(|id| !id.is_empty())
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            let create_root_task = !params.tasks.iter().any(|task| task.id == task_id);
 
-    let mut messages = vec![json!({
-        "role": "system",
-        "content": local_system_prompt()
-    })];
+            Ok((base_url, request_id, conversation_id, run_id, task_id, String::new(), create_root_task))
+        })();
 
-    append_history(&params.tasks, &mut messages);
-    append_current_inputs(&params.input, &params.tasks, &mut messages);
+        let (base_url, request_id, conversation_id, run_id, task_id, _reserved, create_root_task) =
+            match setup {
+                Ok(values) => values,
+                Err(error) => {
+                    yield Err(Arc::new(AIApiError::Other(error)));
+                    return;
+                }
+            };
 
-    if messages.len() <= 1 {
-        messages.push(json!({
-            "role": "user",
-            "content": "Continue the current task using the conversation history. If a tool is needed, request it through the available local tools."
-        }));
-    }
-    bound_messages(&mut messages);
+        // Register before exposing any tool call, so even a very fast local tool cannot
+        // finish before the local model loop is listening for its result.
+        let (feedback_tx, feedback_rx) = async_channel::unbounded::<Arc<AIAgentActionResult>>();
+        let _feedback_registration = register_local_action_results(&task_id, feedback_tx);
 
-    let computer_approved = has_computer_use_approval(&params);
-    let tools = local_tools(params.computer_use_enabled, computer_approved);
-    let body = json!({
-        "model": model,
-        "messages": messages,
-        "tools": tools,
-        "tool_choice": "auto",
-        "stream": false,
-        "temperature": 0.1
-    });
-
-    let response = local_post_json(
-        &client,
-        &format!("{base_url}/chat/completions"),
-        &body,
-        api_key.as_deref(),
-    )
-    .await
-    .context("Local Qwen Chat Completions request failed")?;
-
-    let message = response
-        .pointer("/choices/0/message")
-        .ok_or_else(|| anyhow!("OptiQ response is missing choices[0].message: {}", truncate(&response.to_string(), 2_000)))?;
-
-    let response_text = message
-        .get("content")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let tool_calls = message
-        .get("tool_calls")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-
-    let mut actions: Vec<api::ClientAction> = Vec::new();
-    if create_root_task {
-        actions.push(api::ClientAction {
-            action: Some(api::client_action::Action::CreateTask(
-                api::client_action::CreateTask {
-                    task: Some(api::Task {
-                        id: task_id.clone(),
-                        ..Default::default()
-                    }),
-                },
-            )),
-        });
-    }
-
-    let mut task_messages: Vec<api::Message> = Vec::new();
-
-    for input in &params.input {
-        if let AIAgentInput::UserQuery { query, .. } = input {
-            if !params.tasks.iter().any(|task| task.messages.iter().any(|message| {
-                matches!(message.message.as_ref(), Some(api::message::Message::UserQuery(existing)) if existing.query == *query)
-            })) {
-                task_messages.push(new_message(
-                    &task_id,
-                    &request_id,
-                    api::message::Message::UserQuery(api::message::UserQuery {
-                        query: query.clone(),
-                        ..Default::default()
-                    }),
-                ));
-            }
-        }
-    }
-
-    if !response_text.trim().is_empty() {
-        task_messages.push(new_message(
-            &task_id,
-            &request_id,
-            api::message::Message::AgentOutput(api::message::AgentOutput {
-                text: response_text,
-            }),
-        ));
-    }
-
-    let mut rejected_tools = Vec::new();
-    for call in tool_calls {
-        match make_tool_call(&call, params.computer_use_enabled, computer_approved) {
-            Ok(Some(tool_call)) => {
-                task_messages.push(new_message(
-                    &task_id,
-                    &request_id,
-                    api::message::Message::ToolCall(tool_call),
-                ));
-            }
-            Ok(None) => {}
-            Err(error) => rejected_tools.push(error),
-        }
-    }
-
-    if !rejected_tools.is_empty() {
-        let text = format!(
-            "The local model requested unsupported or malformed tool calls; no action was run:\n{}",
-            rejected_tools.join("\n")
-        );
-        task_messages.push(new_message(
-            &task_id,
-            &request_id,
-            api::message::Message::AgentOutput(api::message::AgentOutput { text }),
-        ));
-    }
-
-    if task_messages.is_empty() {
-        task_messages.push(new_message(
-            &task_id,
-            &request_id,
-            api::message::Message::AgentOutput(api::message::AgentOutput {
-                text: "Qwen returned neither text nor a supported local tool call. Try rephrasing the request.".to_owned(),
-            }),
-        ));
-    }
-
-    actions.push(api::ClientAction {
-        action: Some(api::client_action::Action::AddMessagesToTask(
-            api::client_action::AddMessagesToTask {
-                task_id: task_id.clone(),
-                messages: task_messages,
-            },
-        )),
-    });
-
-    Ok(vec![
-        api::ResponseEvent {
+        let init = api::ResponseEvent {
             r#type: Some(api::response_event::Type::Init(api::response_event::StreamInit {
-                conversation_id,
-                request_id,
+                conversation_id: conversation_id.clone(),
+                request_id: request_id.clone(),
                 run_id,
             })),
-        },
-        api::ResponseEvent {
-            r#type: Some(api::response_event::Type::ClientActions(
-                api::response_event::ClientActions { actions },
-            )),
-        },
-        api::ResponseEvent {
-            r#type: Some(api::response_event::Type::Finished(api::response_event::StreamFinished {
+        };
+        yield Ok(init);
+
+        let client = http_client::Client::new_external();
+        let api_key = std::env::var("OPTIQ_API_KEY")
+            .ok()
+            .filter(|key| !key.trim().is_empty());
+        let model = match model_id(&client, &base_url, api_key.as_deref()).await {
+            Ok(model) => model,
+            Err(error) => {
+                yield Err(Arc::new(AIApiError::Other(error.context("Could not select a local OptiQ model"))));
+                return;
+            }
+        };
+
+        let mut messages = vec![json!({
+            "role": "system",
+            "content": local_system_prompt()
+        })];
+        append_history(&params.tasks, &mut messages);
+        append_current_inputs(&params.input, &params.tasks, &mut messages);
+        if messages.len() <= 1 {
+            messages.push(json!({
+                "role": "user",
+                "content": "Continue the current task using the conversation history. If a tool is needed, request it through the available local tools."
+            }));
+        }
+        bound_messages(&mut messages);
+
+        // Create/echo the user's query into Warp's actual conversation history before inference.
+        let mut opening_actions: Vec<api::ClientAction> = Vec::new();
+        if create_root_task {
+            let description = params.input.iter().find_map(|input| match input {
+                AIAgentInput::UserQuery { query, .. } => Some(query.clone()),
+                AIAgentInput::AutoCodeDiffQuery { query, .. } => Some(query.clone()),
+                _ => None,
+            }).unwrap_or_else(|| "Local Qwen task".to_owned());
+            opening_actions.push(api::ClientAction {
+                action: Some(api::client_action::Action::CreateTask(
+                    api::client_action::CreateTask {
+                        task: Some(api::Task {
+                            id: task_id.clone(),
+                            description,
+                            ..Default::default()
+                        }),
+                    },
+                )),
+            });
+        }
+        let mut opening_messages: Vec<api::Message> = Vec::new();
+        for input in &params.input {
+            if let AIAgentInput::UserQuery { query, .. } = input {
+                let already_in_history = params.tasks.iter().any(|task| task.messages.iter().any(|message| {
+                    matches!(message.message.as_ref(), Some(api::message::Message::UserQuery(existing)) if existing.query == *query)
+                }));
+                if !already_in_history {
+                    opening_messages.push(new_message(
+                        &task_id,
+                        &request_id,
+                        api::message::Message::UserQuery(api::message::UserQuery {
+                            query: query.clone(),
+                            ..Default::default()
+                        }),
+                    ));
+                }
+            }
+        }
+        if !opening_messages.is_empty() {
+            opening_actions.push(api::ClientAction {
+                action: Some(api::client_action::Action::AddMessagesToTask(
+                    api::client_action::AddMessagesToTask {
+                        task_id: task_id.clone(),
+                        messages: opening_messages,
+                    },
+                )),
+            });
+        }
+        if !opening_actions.is_empty() {
+            yield Ok(api::ResponseEvent {
+                r#type: Some(api::response_event::Type::ClientActions(
+                    api::response_event::ClientActions { actions: opening_actions },
+                )),
+            });
+        }
+
+        let mut computer_approved = has_computer_use_approval(&params);
+        let mut iteration = 0usize;
+        let mut total_tool_calls = 0usize;
+
+        loop {
+            if iteration >= MAX_AGENT_ITERATIONS || total_tool_calls >= MAX_TOTAL_TOOL_CALLS {
+                let text = format!(
+                    "Stopped the local agent loop at its safety limit ({} model rounds, {} tool calls). Review the current changes and submit a follow-up prompt to continue.",
+                    iteration, total_tool_calls
+                );
+                let action = api::ClientAction {
+                    action: Some(api::client_action::Action::AddMessagesToTask(
+                        api::client_action::AddMessagesToTask {
+                            task_id: task_id.clone(),
+                            messages: vec![new_message(
+                                &task_id,
+                                &request_id,
+                                api::message::Message::AgentOutput(api::message::AgentOutput { text }),
+                            )],
+                        },
+                    )),
+                };
+                yield Ok(api::ResponseEvent {
+                    r#type: Some(api::response_event::Type::ClientActions(
+                        api::response_event::ClientActions { actions: vec![action] },
+                    )),
+                });
+                yield Ok(finished_event());
+                return;
+            }
+            iteration += 1;
+
+            let body = json!({
+                "model": model,
+                "messages": messages,
+                "tools": local_tools(params.computer_use_enabled, computer_approved),
+                "tool_choice": "auto",
+                "stream": false,
+                "temperature": 0.1,
+                "max_tokens": 4096
+            });
+            let response_result = futures::select! {
+                response = local_post_json(
+                    &client,
+                    &format!("{base_url}/chat/completions"),
+                    &body,
+                    api_key.as_deref(),
+                ).fuse() => response,
+                _ = cancellation => {
+                    return;
+                }
+            };
+            let response = match response_result {
+                Ok(response) => response,
+                Err(error) => {
+                    yield Err(Arc::new(AIApiError::Other(error.context("Local Qwen Chat Completions request failed"))));
+                    return;
+                }
+            };
+
+            let Some(message) = response.pointer("/choices/0/message") else {
+                yield Err(Arc::new(AIApiError::Other(anyhow!(
+                    "OptiQ response is missing choices[0].message: {}",
+                    truncate(&response.to_string(), 2_000)
+                ))));
+                return;
+            };
+            let response_text = message
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let tool_calls = message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+
+            // A plain answer completes the turn. Otherwise emit native Warp tool-call
+            // messages and keep this same response stream alive until their results return.
+            if tool_calls.is_empty() {
+                let text = if response_text.trim().is_empty() {
+                    "Qwen returned neither text nor a supported local tool call. Try rephrasing the request.".to_owned()
+                } else {
+                    response_text
+                };
+                let action = api::ClientAction {
+                    action: Some(api::client_action::Action::AddMessagesToTask(
+                        api::client_action::AddMessagesToTask {
+                            task_id: task_id.clone(),
+                            messages: vec![new_message(
+                                &task_id,
+                                &request_id,
+                                api::message::Message::AgentOutput(api::message::AgentOutput { text }),
+                            )],
+                        },
+                    )),
+                };
+                yield Ok(api::ResponseEvent {
+                    r#type: Some(api::response_event::Type::ClientActions(
+                        api::response_event::ClientActions { actions: vec![action] },
+                    )),
+                });
+                yield Ok(finished_event());
+                return;
+            }
+
+            let mut task_messages: Vec<api::Message> = Vec::new();
+            if !response_text.trim().is_empty() {
+                task_messages.push(new_message(
+                    &task_id,
+                    &request_id,
+                    api::message::Message::AgentOutput(api::message::AgentOutput {
+                        text: response_text.clone(),
+                    }),
+                ));
+            }
+            let mut normalized_tool_calls: Vec<Value> = Vec::new();
+            let mut pending_tool_ids: HashSet<String> = HashSet::new();
+            let mut rejected_tool_results: Vec<(String, String)> = Vec::new();
+
+            for call in &tool_calls {
+                total_tool_calls += 1;
+                let warp_tool_id = Uuid::new_v4().to_string();
+                let function = call.get("function").cloned().unwrap_or(Value::Null);
+                normalized_tool_calls.push(json!({
+                    "id": warp_tool_id,
+                    "type": "function",
+                    "function": function
+                }));
+
+                if total_tool_calls > MAX_TOTAL_TOOL_CALLS {
+                    rejected_tool_results.push((
+                        warp_tool_id,
+                        "Rejected: the local agent reached its maximum tool-call limit.".to_owned()
+                    ));
+                    continue;
+                }
+
+                let mut call_for_warp = call.clone();
+                call_for_warp["id"] = Value::String(warp_tool_id.clone());
+                match make_tool_call(&call_for_warp, params.computer_use_enabled, computer_approved) {
+                    Ok(Some(tool_call)) => {
+                        task_messages.push(new_message(
+                            &task_id,
+                            &request_id,
+                            api::message::Message::ToolCall(tool_call),
+                        ));
+                        pending_tool_ids.insert(warp_tool_id);
+                    }
+                    Ok(None) => {
+                        rejected_tool_results.push((
+                            warp_tool_id,
+                            "Rejected: this tool is not supported by the local Warp backend.".to_owned()
+                        ));
+                    }
+                    Err(error) => {
+                        rejected_tool_results.push((warp_tool_id, format!("Rejected local tool call: {error:#}")));
+                    }
+                }
+            }
+
+            // Save the exact assistant tool-call message before tool results, using UUIDs
+            // that Warp's action model can round-trip safely.
+            messages.push(json!({
+                "role": "assistant",
+                "content": if response_text.is_empty() { Value::Null } else { Value::String(response_text) },
+                "tool_calls": normalized_tool_calls
+            }));
+            for (tool_id, reason) in &rejected_tool_results {
+                messages.push(json!({"role":"tool","tool_call_id":tool_id,"content":reason}));
+            }
+
+            if !rejected_tool_results.is_empty() {
+                task_messages.push(new_message(
+                    &task_id,
+                    &request_id,
+                    api::message::Message::AgentOutput(api::message::AgentOutput {
+                        text: format!(
+                            "Some requested actions were rejected before execution. The reason was returned to the local model so it can recover:\n{}",
+                            rejected_tool_results.iter().map(|(_, reason)| reason.as_str()).collect::<Vec<_>>().join("\n")
+                        ),
+                    }),
+                ));
+            }
+
+            if !task_messages.is_empty() {
+                let action = api::ClientAction {
+                    action: Some(api::client_action::Action::AddMessagesToTask(
+                        api::client_action::AddMessagesToTask {
+                            task_id: task_id.clone(),
+                            messages: task_messages,
+                        },
+                    )),
+                };
+                yield Ok(api::ResponseEvent {
+                    r#type: Some(api::response_event::Type::ClientActions(
+                        api::response_event::ClientActions { actions: vec![action] },
+                    )),
+                });
+            }
+
+            if pending_tool_ids.is_empty() {
+                // There were no executable tools in this model response. Their tool errors
+                // are already in history; ask Qwen for a corrected action or final answer.
+                continue;
+            }
+
+            while !pending_tool_ids.is_empty() {
+                let result = futures::select! {
+                    result = feedback_rx.recv().fuse() => match result {
+                        Ok(result) => result,
+                        Err(_) => {
+                            yield Err(Arc::new(AIApiError::Other(anyhow!("Warp local action-result channel closed"))));
+                            return;
+                        }
+                    },
+                    _ = cancellation => {
+                        return;
+                    }
+                };
+                let result_id = result.id.to_string();
+                if !pending_tool_ids.remove(&result_id) {
+                    // A late or unrelated action result must never be associated with a
+                    // different model-generated tool call.
+                    continue;
+                }
+                if matches!(
+                    &result.result,
+                    AIAgentActionResultType::RequestComputerUse(RequestComputerUseResult::Approved { .. })
+                ) {
+                    computer_approved = true;
+                }
+                append_action_result_for_tool(&result, &result_id, &mut messages);
+            }
+            bound_messages(&mut messages);
+        }
+    };
+    Box::pin(output)
+}
+
+fn finished_event() -> api::ResponseEvent {
+    api::ResponseEvent {
+        r#type: Some(api::response_event::Type::Finished(
+            api::response_event::StreamFinished {
                 reason: Some(api::response_event::stream_finished::Reason::Done(
                     api::response_event::stream_finished::Done {},
                 )),
                 ..Default::default()
-            })),
-        },
-    ])
+            },
+        )),
+    }
 }
 
 fn local_system_prompt() -> &'static str {
