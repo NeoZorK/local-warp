@@ -180,7 +180,7 @@ macro_rules! send_telemetry_from_ctx {
 macro_rules! send_telemetry_from_app_ctx {
     ($event:expr, $app_ctx:expr) => {
         let event = $event;
-        if event.enablement_state().is_enabled() {
+        if !$crate::telemetry::is_local_offline_mode() && event.enablement_state().is_enabled() {
             let auth_state =
                 <$crate::telemetry::TelemetryContextModel as $crate::warpui_core::SingletonEntity>::handle(
                     $app_ctx,
