@@ -1752,6 +1752,9 @@ impl LLMPreferences {
         scope: &(impl TeamScope + ?Sized),
         app: &'a AppContext,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         self.fallback_llm_info(
             &UserWorkspaces::as_ref(app)
                 .feature_model_choice_for_scope(scope)
@@ -1765,6 +1768,9 @@ impl LLMPreferences {
         team_uid: Option<ServerId>,
         app: &'a AppContext,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         self.fallback_llm_info(
             &UserWorkspaces::as_ref(app)
                 .feature_model_choice_for_team_uid(team_uid)
@@ -1780,6 +1786,9 @@ impl LLMPreferences {
         scope: &(impl TeamScope + ?Sized),
         app: &'a AppContext,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         self.fallback_llm_info(
             &UserWorkspaces::as_ref(app)
                 .feature_model_choice_for_scope(scope)
@@ -1794,6 +1803,9 @@ impl LLMPreferences {
         scope: &(impl TeamScope + ?Sized),
         app: &'a AppContext,
     ) -> Option<&'a LLMInfo> {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return None;
+        }
         let agent_mode = &UserWorkspaces::as_ref(app)
             .feature_model_choice_for_scope(scope)
             .agent_mode;
