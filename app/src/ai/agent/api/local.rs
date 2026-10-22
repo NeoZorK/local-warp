@@ -21,7 +21,7 @@ use crate::ai::agent::{AIAgentActionResult, AIAgentActionResultType, AIAgentInpu
 use crate::server::server_api::AIApiError;
 use crate::terminal::model::session::SessionType;
 
-use super::{Event, RequestParams, ResponseStream};
+use super::{RequestParams, ResponseStream};
 
 const DEFAULT_OPTIQ_BASE_URL: &str = "http://127.0.0.1:9163/v1";
 const DEFAULT_MODEL_ID: &str = "mlx-community/Qwen3.5-9B-OptiQ-4bit";
@@ -355,7 +355,11 @@ pub(crate) async fn generate_local_multi_agent_output(
             for call in &tool_calls {
                 total_tool_calls += 1;
                 let warp_tool_id = Uuid::new_v4().to_string();
-                let function = call.get("function").cloned().unwrap_or(Value::Null);
+                let function = call
+                    .get("function")
+                    .filter(|value| value.is_object())
+                    .cloned()
+                    .unwrap_or_else(|| json!({"name":"invalid_tool_call","arguments":"{}"}));
                 normalized_tool_calls.push(json!({
                     "id": warp_tool_id,
                     "type": "function",
@@ -727,6 +731,17 @@ fn append_action_result_for_tool(
         _ => None,
     };
     if let Some((mime_type, bytes)) = screenshot {
+        // Keep only the most recent executor screenshot to bound memory and context usage.
+        messages.retain(|message| {
+            let Some(parts) = message.get("content").and_then(Value::as_array) else {
+                return true;
+            };
+            !parts.iter().any(|part| {
+                part.get("text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| text.starts_with("Latest screenshot from Warp's local computer-use executor."))
+            })
+        });
         let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
         messages.push(json!({
             "role": "user",
