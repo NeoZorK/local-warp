@@ -101,10 +101,7 @@ fn default_manifest(harness: Harness) -> Option<HarnessManifest> {
         Harness::Codex => ("codex-acp", &[], Some(&CodexHarness)),
         Harness::Gemini => ("gemini", &["--experimental-acp"], Some(&GeminiHarness)),
         Harness::Pi => ("pi-acp", &[], None),
-        // OpenCode implements ACP over stdio. With a local OpenAI-compatible provider,
-        // this keeps model traffic inside the local OpenCode process.
-        Harness::OpenCode => ("opencode", &["acp"], None),
-        Harness::Oz | Harness::Unknown => return None,
+        Harness::Oz | Harness::OpenCode | Harness::Unknown => return None,
     };
     Some(HarnessManifest {
         launch: AcpLaunchSpec {
