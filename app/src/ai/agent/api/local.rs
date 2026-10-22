@@ -369,6 +369,7 @@ pub(crate) async fn generate_local_multi_agent_output(
             }
             let mut normalized_tool_calls: Vec<Value> = Vec::new();
             let mut pending_tool_ids: HashSet<String> = HashSet::new();
+            let mut pending_tool_order: Vec<String> = Vec::new();
             let mut rejected_tool_results: Vec<(String, String)> = Vec::new();
 
             for call in &tool_calls {
@@ -402,7 +403,8 @@ pub(crate) async fn generate_local_multi_agent_output(
                             &request_id,
                             api::message::Message::ToolCall(tool_call),
                         ));
-                        pending_tool_ids.insert(warp_tool_id);
+                        pending_tool_ids.insert(warp_tool_id.clone());
+                        pending_tool_order.push(warp_tool_id);
                     }
                     Ok(None) => {
                         rejected_tool_results.push((
@@ -462,6 +464,7 @@ pub(crate) async fn generate_local_multi_agent_output(
                 continue;
             }
 
+            let mut pending_results: HashMap<String, Arc<AIAgentActionResult>> = HashMap::new();
             while !pending_tool_ids.is_empty() {
                 let result = futures::select! {
                     result = feedback_rx.recv().fuse() => match result {
@@ -487,7 +490,15 @@ pub(crate) async fn generate_local_multi_agent_output(
                 ) {
                     computer_approved = true;
                 }
-                append_action_result_for_tool(&result, &result_id, &mut messages);
+                pending_results.insert(result_id, result);
+            }
+
+            // Preserve the model's original tool-call order even when Warp completes
+            // parallel local actions in a different order.
+            for tool_id in pending_tool_order {
+                if let Some(result) = pending_results.remove(&tool_id) {
+                    append_action_result_for_tool(&result, &tool_id, &mut messages);
+                }
             }
             bound_messages(&mut messages);
         }
