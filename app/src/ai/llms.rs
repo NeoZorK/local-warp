@@ -1184,23 +1184,25 @@ impl LLMPreferences {
     ) -> impl Iterator<Item = &'a LLMInfo> + use<'a, S> {
         let local_only = warp_core::telemetry::is_local_offline_mode();
         let local_model: &'a LLMInfo = local_qwen_llm_info();
-        if local_only {
-            return std::iter::once(local_model).chain(std::iter::empty());
-        }
-        // Don't show admin-disabled models in the dropdown
         let routers_enabled = FeatureFlag::CustomModelRouters.is_enabled();
-        UserWorkspaces::as_ref(app)
-            .feature_model_choice_for_scope(scope)
-            .coding
-            .choices
-            .iter()
-            .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
-            // Gate cloud/team routers behind the same flag as local routers.
-            .filter(move |llm| {
-                routers_enabled || !custom_model_routers::is_cloud_custom_router_id(llm.id.as_str())
-            })
-            .chain(self.custom_llm_choices(app))
-            .chain(self.custom_router_choices())
+        std::iter::once(local_model)
+            .filter(move |_| local_only)
+            .chain(
+                UserWorkspaces::as_ref(app)
+                    .feature_model_choice_for_scope(scope)
+                    .coding
+                    .choices
+                    .iter()
+                    .filter(move |_| !local_only)
+                    .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
+                    // Gate cloud/team routers behind the same flag as local routers.
+                    .filter(move |llm| {
+                        routers_enabled
+                            || !custom_model_routers::is_cloud_custom_router_id(llm.id.as_str())
+                    })
+                    .chain(self.custom_llm_choices(app).filter(move |_| !local_only))
+                    .chain(self.custom_router_choices().filter(move |_| !local_only)),
+            )
     }
 
     /// Returns the set of LLMs available for CLI agent.
@@ -1211,15 +1213,16 @@ impl LLMPreferences {
     ) -> impl Iterator<Item = &'a LLMInfo> + use<'a, S> {
         let local_only = warp_core::telemetry::is_local_offline_mode();
         let local_model: &'a LLMInfo = local_qwen_llm_info();
-        if local_only {
-            return std::iter::once(local_model).chain(std::iter::empty());
-        }
-        // Don't show admin-disabled models in the dropdown
-        self.get_cli_agent_available(scope.team_uid(), app)
-            .choices
-            .iter()
-            .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
-            .chain(self.custom_llm_choices(app))
+        std::iter::once(local_model)
+            .filter(move |_| local_only)
+            .chain(
+                self.get_cli_agent_available(scope.team_uid(), app)
+                    .choices
+                    .iter()
+                    .filter(move |_| !local_only)
+                    .filter(|llm| !matches!(llm.disable_reason, Some(DisableReason::AdminDisabled)))
+                    .chain(self.custom_llm_choices(app).filter(move |_| !local_only)),
+            )
     }
 
     /// Returns the `LLMInfo` for the CLI agent model.
@@ -1302,12 +1305,14 @@ impl LLMPreferences {
     ) -> impl Iterator<Item = &'a LLMInfo> {
         let local_only = warp_core::telemetry::is_local_offline_mode();
         let local_model: &'a LLMInfo = local_qwen_llm_info();
-        if local_only {
-            return std::iter::once(local_model).chain(std::iter::empty());
-        }
-        self.get_computer_use_available(scope.team_uid(), app)
-            .choices
-            .iter()
+        std::iter::once(local_model)
+            .filter(move |_| local_only)
+            .chain(
+                self.get_computer_use_available(scope.team_uid(), app)
+                    .choices
+                    .iter()
+                    .filter(move |_| !local_only),
+            )
     }
 
     /// Returns the `LLMInfo` for the computer use agent model.
