@@ -12,7 +12,10 @@ use warpui_core::{AppContext, Entity, SingletonEntity};
 use crate::channel::{Channel, ChannelState};
 use crate::features::FeatureFlag;
 
-/// True when this process is running in the strict local/offline profile.\n/// Telemetry events are neither queued nor emitted in this mode.\npub fn is_local_offline_mode() -> bool {\n    std::env::var_os("WARP_LOCAL_OFFLINE").is_some()\n}\n
+/// True when this process is running in the strict local/offline profile.
+pub fn is_local_offline_mode() -> bool {
+    std::env::var_os("WARP_LOCAL_OFFLINE").is_some()
+}\n
 /// Core trait defining telemetry event behavior.
 ///
 /// This trait encapsulates the basic functionality required for any telemetry event
