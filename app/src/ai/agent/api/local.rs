@@ -1071,6 +1071,8 @@ fn mouse_button(action: &Value) -> anyhow::Result<i32> {
         "left" => Ok(0),
         "right" => Ok(1),
         "middle" => Ok(2),
+        "back" => Ok(3),
+        "forward" => Ok(4),
         _ => bail!("Unsupported mouse button; refusing to guess a potentially destructive click"),
     }
 }
@@ -1079,20 +1081,48 @@ fn parse_computer_key(
     key: &str,
 ) -> anyhow::Result<api::message::tool_call::use_computer::action::Key> {
     use api::message::tool_call::use_computer::action::key::Data;
-    let data = if key.chars().count() == 1 {
-        Data::Char(key.to_owned())
+    let normalized = key.trim().to_ascii_lowercase().replace(['-', '_', ' '], "");
+    let data = if normalized.chars().count() == 1 {
+        Data::Char(normalized)
     } else {
-        let keycode = match key.to_ascii_lowercase().as_str() {
+        let keycode = match normalized.as_str() {
             "enter" | "return" => 36,
             "tab" => 48,
-            "escape" | "esc" => 53,
             "space" => 49,
             "backspace" => 51,
-            "delete" => 117,
+            "escape" | "esc" => 53,
+            "command" | "cmd" | "meta" | "super" => 55,
+            "rightcommand" | "rightcmd" => 54,
+            "shift" => 56,
+            "capslock" => 57,
+            "option" | "alt" => 58,
+            "control" | "ctrl" => 59,
+            "rightshift" => 60,
+            "rightoption" | "rightalt" => 61,
+            "rightcontrol" | "rightctrl" => 62,
+            "fn" | "function" => 63,
+            "home" => 115,
+            "pageup" => 116,
+            "forwarddelete" | "delete" => 117,
+            "end" => 119,
+            "f1" => 122,
             "left" => 123,
             "right" => 124,
             "down" => 125,
             "up" => 126,
+            "f2" => 120,
+            "f3" => 99,
+            "f4" => 118,
+            "f5" => 96,
+            "f6" => 97,
+            "f7" => 98,
+            "f8" => 100,
+            "f9" => 101,
+            "f10" => 109,
+            "f11" => 103,
+            "f12" => 111,
+            "pagedown" => 121,
+            "insert" => bail!("The Insert key is not supported on macOS"),
             _ => bail!("Unsupported computer key '{key}'; refusing to substitute a different key"),
         };
         Data::Keycode(keycode)
