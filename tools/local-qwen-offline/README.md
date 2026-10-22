@@ -36,7 +36,7 @@ OPTIQ_API_KEY is optional. By default, the local backend discovers the model ID 
 - Computer use requests go through Warp's permission flow. The local model receives approved screenshot bytes through the loopback request, and computer actions are routed through Warp's existing executor.
 - Web search, research agent, orchestration, and cloud-subagent tools are not offered by the local backend.
 - Telemetry event macros do not enqueue in offline mode; the telemetry collector skips flush/persistence and discards queued telemetry.
-- The launcher wraps the process in a macOS Seatbelt policy that denies external network access and allows loopback only.
+- The launcher wraps the Warp process tree in a macOS Seatbelt policy that denies external network access and allows only the configured loopback OptiQ port.
 
 ## Important limitations and validation
 
