@@ -8,7 +8,7 @@ This branch adds a native in-process local Agent Mode backend. In WARP_LOCAL_OFF
 2. From the root of this checkout, build the fork once with locally cached dependencies:
 
 ```bash
-cargo build --offline -p warp --bin warp
+cargo build --offline -p warp --bin warp-oss
 ```
 
 3. Launch through the network-isolating wrapper:
@@ -40,7 +40,7 @@ OPTIQ_API_KEY is optional. By default, the local backend discovers the model ID 
 
 ## Important limitations and validation
 
-This is a first native prototype, not a verified production release. I cannot run the repository's Rust build or macOS desktop/security tests from GitHub's hosted source editor. Run cargo check -p warp --bin warp and the manual test below on the target Mac before relying on it.
+This is a first native prototype, not a verified production release. I cannot run the repository's Rust build or macOS desktop/security tests from GitHub's hosted source editor. Run cargo check -p warp --bin warp-oss and the manual test below on the target Mac before relying on it.
 
 The local backend is non-streaming: the model's answer appears after each Chat Completions request finishes. It supports the tools explicitly implemented in local.rs; unsupported Warp tool types are not exposed. Tool results are fed back on the next turn, matching Warp's existing request/action-result lifecycle.
 
