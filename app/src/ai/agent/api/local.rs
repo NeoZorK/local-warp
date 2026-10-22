@@ -84,9 +84,8 @@ async fn run_local_turn(params: RequestParams) -> anyhow::Result<Vec<api::Respon
         "content": local_system_prompt()
     })];
 
-    let mut echoed_user_queries: Vec<String> = Vec::new();
     append_history(&params.tasks, &mut messages);
-    append_current_inputs(&params.input, &params.tasks, &mut messages, &mut echoed_user_queries);
+    append_current_inputs(&params.input, &params.tasks, &mut messages);
 
     if messages.len() <= 1 {
         messages.push(json!({
@@ -258,7 +257,7 @@ fn local_base_url() -> anyhow::Result<String> {
     anyhow::ensure!(parsed.scheme() == "http", "OptiQ must use plain HTTP on loopback; TLS is not needed locally");
     let host = parsed.host_str().unwrap_or_default();
     let is_loopback = host.eq_ignore_ascii_case("localhost")
-        || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
+        || host == "127.0.0.1";
     anyhow::ensure!(is_loopback, "Refusing non-loopback OptiQ URL: {host}");
     anyhow::ensure!(
         parsed.query().is_none() && parsed.username().is_empty() && parsed.password().is_none(),
@@ -270,6 +269,7 @@ fn local_base_url() -> anyhow::Result<String> {
     );
     let origin = format!("{}://{}{}", parsed.scheme(), host, parsed.port().map(|p| format!(":{p}")).unwrap_or_default());
     let path = parsed.path().trim_end_matches('/');
+    let path = if path.is_empty() { "/v1" } else { path };
     Ok(format!("{origin}{path}").trim_end_matches('/').to_owned())
 }
 
@@ -399,7 +399,6 @@ fn append_current_inputs(
     inputs: &[AIAgentInput],
     tasks: &[api::Task],
     messages: &mut Vec<Value>,
-    echoed_user_queries: &mut Vec<String>,
 ) {
     for input in inputs {
         match input {
@@ -408,14 +407,11 @@ fn append_current_inputs(
                     matches!(message.message.as_ref(), Some(api::message::Message::UserQuery(existing)) if existing.query == *query)
                 }));
                 if !already_in_history {
-                    let context_text = truncate(&format!("{context:#?}"), 16_000);
-                    let content = if context_text.trim().is_empty() {
-                        query.clone()
-                    } else {
-                        format!("{query}\n\nLocal context from Warp:\n{context_text}")
-                    };
-                    messages.push(json!({"role":"user","content": truncate(&content, MAX_CONTEXT_CHARS)}));
-                    echoed_user_queries.push(query.clone());
+                    messages.push(json!({"role":"user","content": truncate(query, MAX_CONTEXT_CHARS)}));
+                }
+                let context_text = truncate(&format!("{context:#?}"), 16_000);
+                if !context_text.trim().is_empty() {
+                    messages.push(json!({"role":"user","content":format!("Local context from Warp:\\n{context_text}")}));
                 }
             }
             AIAgentInput::ActionResult { result, .. } => {
@@ -426,7 +422,6 @@ fn append_current_inputs(
             AIAgentInput::AutoCodeDiffQuery { query, context } => {
                 let context_text = truncate(&format!("{context:#?}"), 12_000);
                 messages.push(json!({"role":"user","content": truncate(&format!("{query}\n\nLocal context:\n{context_text}"), MAX_CONTEXT_CHARS)}));
-                echoed_user_queries.push(query.clone());
             }
             AIAgentInput::ResumeConversation { context } => {
                 messages.push(json!({"role":"user","content":truncate(&format!("Continue the task. Current local context:\n{context:#?}"), 16_000)}));
@@ -677,7 +672,7 @@ fn make_tool_call(
 }
 
 fn parse_use_computer(arguments: &Value) -> anyhow::Result<api::message::tool_call::UseComputer> {
-    use api::message::tool_call::use_computer::action::{Key, Type as ActionType};
+    use api::message::tool_call::use_computer::action::Type as ActionType;
     use api::message::tool_call::use_computer::Action as ComputerAction;
 
     let mut actions = Vec::new();
@@ -846,40 +841,6 @@ fn local_tool_result_text(result: &api::message::ToolCallResult) -> String {
         None => "Local tool produced no result.".to_owned(),
     }
 }
-
-fn history_has_tool_result(tasks: &[api::Task], action_id: &str) -> bool {
-    tasks.iter().any(|task| task.messages.iter().any(|message| {
-        matches!(message.message.as_ref(), Some(api::message::Message::ToolCallResult(result)) if result.tool_call_id == action_id)
-    }))
-}
-
-fn has_computer_use_approval(params: &RequestParams) -> bool {
-    if params.input.iter().any(|input| matches!(
-        input,
-        AIAgentInput::ActionResult {
-            result: AIAgentActionResult {
-                result: AIAgentActionResultType::RequestComputerUse(RequestComputerUseResult::Approved { .. }),
-                ..
-            },
-            ..
-        }
-    )) {
-        return true;
-    }
-    params.tasks.iter().any(|task| task.messages.iter().any(|message| {
-        let Some(api::message::Message::ToolCallResult(result)) = message.message.as_ref() else {
-            return false;
-        };
-        let Some(api::message::tool_call_result::Result::RequestComputerUseResult(request)) = result.result.as_ref() else {
-            return false;
-        };
-        matches!(
-            request.result.as_ref(),
-            Some(api::message::tool_call_result::request_computer_use_result::Result::Approved(_))
-        )
-    }))
-}
-
 fn bound_messages(messages: &mut Vec<Value>) {
     // Keep the system message and most recent history; avoid exhausting the local model's context.
     if messages.len() > MAX_HISTORY_MESSAGES + 1 {
