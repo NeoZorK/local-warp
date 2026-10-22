@@ -95,7 +95,7 @@ pub async fn generate_multi_agent_output(
             api_keys,
             autonomy_level: params.autonomy_level.into(),
             isolation_level: params.isolation_level.into(),
-            web_search_enabled: params.web_search_enabled,
+            web_search_enabled: params.web_search_enabled && !warp_core::telemetry::is_local_offline_mode(),
             supported_cli_agent_tools: supported_cli_agent_tools
                 .into_iter()
                 .map(Into::into)
@@ -104,9 +104,13 @@ pub async fn generate_multi_agent_output(
             supports_summarization_via_message_replacement:
                 FeatureFlag::SummarizationViaMessageReplacement.is_enabled(),
             supports_bundled_skills: FeatureFlag::BundledSkills.is_enabled(),
-            supports_research_agent: params.research_agent_enabled,
-            supports_orchestration_v2: supports_orchestration_v2(params.orchestration_enabled),
+            supports_research_agent: params.research_agent_enabled
+                && !warp_core::telemetry::is_local_offline_mode(),
+            supports_orchestration_v2: supports_orchestration_v2(
+                params.orchestration_enabled && !warp_core::telemetry::is_local_offline_mode(),
+            ),
             supports_orchestration_runners: params.orchestration_enabled
+                && !warp_core::telemetry::is_local_offline_mode()
                 && FeatureFlag::CloudAgentRunners.is_enabled(),
             supports_background_computer_use: FeatureFlag::BackgroundComputerUse.is_enabled()
                 && computer_use::background_supported(),
@@ -233,7 +237,6 @@ fn get_supported_tools(params: &RequestParams) -> Vec<api::ToolType> {
         api::ToolType::OpenCodeReview,
         api::ToolType::RunShellCommand,
         api::ToolType::SuggestNewConversation,
-        api::ToolType::Subagent,
         api::ToolType::WriteToLongRunningShellCommand,
         api::ToolType::ReadShellCommandOutput,
         api::ToolType::ReadDocuments,
@@ -241,6 +244,10 @@ fn get_supported_tools(params: &RequestParams) -> Vec<api::ToolType> {
         api::ToolType::EditDocuments,
         api::ToolType::SuggestPrompt,
     ];
+
+    if !warp_core::telemetry::is_local_offline_mode() {
+        supported_tools.push(api::ToolType::Subagent);
+    }
 
     if FeatureFlag::ConversationsAsContext.is_enabled() {
         supported_tools.push(api::ToolType::FetchConversation);
@@ -288,7 +295,7 @@ fn get_supported_tools(params: &RequestParams) -> Vec<api::ToolType> {
         supported_tools.push(api::ToolType::ReadSkill);
     }
 
-    if params.orchestration_enabled {
+    if params.orchestration_enabled && !warp_core::telemetry::is_local_offline_mode() {
         supported_tools.extend([api::ToolType::RunAgents, api::ToolType::SendMessageToAgent]);
         // Declare client-handled wait_for_events so the server doesn't
         // fall back to the legacy server-handled form.
