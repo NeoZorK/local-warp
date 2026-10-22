@@ -36,12 +36,28 @@ pub struct TelemetryCollector {
     server_api: Arc<ServerApi>,
 }
 
+fn local_offline_mode() -> bool {
+    warp_core::telemetry::is_local_offline_mode()
+}
+
+/// In strict offline mode, discard queued events and remove persisted queues so a later
+/// online launch cannot flush telemetry collected during or before the offline session.
+fn discard_queued_telemetry() {
+    clear_event_queue();
+    let _ = remove_file(rudder_event_file_path());
+    let _ = remove_file(warp_core::paths::state_dir().join(RUDDER_TELEMETRY_EVENTS_FILE_NAME));
+}
+
 impl TelemetryCollector {
     pub fn new(server_api: Arc<ServerApi>) -> Self {
         Self { server_api }
     }
 
     pub fn initialize_telemetry_collection(&self, ctx: &mut ModelContext<TelemetryCollector>) {
+        if local_offline_mode() {
+            discard_queued_telemetry();
+            return;
+        }
         // Start a background thread to periodically flush events from the telemetry event queue.
         if ChannelState::is_release_bundle() || FeatureFlag::WithSandboxTelemetry.is_enabled() {
             // Flush the events to Rudderstack that were persisted into a file the last time the app was
@@ -80,6 +96,10 @@ impl TelemetryCollector {
     /// Writes all queued but unsent telemetry telemetry events to disk so that they may be sent
     /// on the next app startup.
     pub fn write_telemetry_events_to_disk(&self, ctx: &mut ModelContext<TelemetryCollector>) {
+        if local_offline_mode() {
+            discard_queued_telemetry();
+            return;
+        }
         match self.server_api.persist_telemetry_events(
             MAX_TELEMETRY_EVENTS_TO_STORE,
             PrivacySettings::as_ref(ctx).get_snapshot(ctx),
@@ -99,6 +119,10 @@ impl TelemetryCollector {
     /// * Write events to disk, for sending on the next app startup
     /// * Synchronously send events to rudderstack
     pub fn flush_telemetry_events_for_shutdown(&self, ctx: &mut ModelContext<TelemetryCollector>) {
+        if local_offline_mode() {
+            discard_queued_telemetry();
+            return;
+        }
         let execution_mode = AppExecutionMode::as_ref(ctx);
 
         if execution_mode.send_telemetry_at_shutdown() {
