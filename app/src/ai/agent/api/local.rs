@@ -5,7 +5,6 @@
 //! existing local action executors consume, so file, shell, and approved computer-use actions
 //! continue through Warp's existing UI/permission path.
 
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -102,7 +101,6 @@ async fn run_local_turn(params: RequestParams) -> anyhow::Result<Vec<api::Respon
         "messages": messages,
         "tools": tools,
         "tool_choice": "auto",
-        "parallel_tool_calls": true,
         "stream": false,
         "temperature": 0.1
     });
@@ -411,7 +409,7 @@ fn append_current_inputs(
                 }
                 let context_text = truncate(&format!("{context:#?}"), 16_000);
                 if !context_text.trim().is_empty() {
-                    messages.push(json!({"role":"user","content":format!("Local context from Warp:\\n{context_text}")}));
+                    messages.push(json!({"role":"user","content":format!("Local context from Warp:\n{context_text}")}));
                 }
             }
             AIAgentInput::ActionResult { result, .. } => {
