@@ -1135,18 +1135,25 @@ impl LLMPreferences {
         app: &'a AppContext,
     ) -> impl Iterator<Item = &'a LLMInfo> + use<'a> {
         let routers_enabled = FeatureFlag::CustomModelRouters.is_enabled();
-        UserWorkspaces::as_ref(app)
-            .feature_model_choice_for_team_uid(team_uid)
-            .agent_mode
-            .choices
-            .iter()
-            // Gate cloud/team routers behind the same flag as local routers so
-            // the entire custom-router feature is controlled by one flag.
-            .filter(move |llm| {
-                routers_enabled || !custom_model_routers::is_cloud_custom_router_id(llm.id.as_str())
-            })
-            .chain(self.custom_llm_choices(app))
-            .chain(self.custom_router_choices())
+        let local_only = warp_core::telemetry::is_local_offline_mode();
+        std::iter::once(local_qwen_llm_info())
+            .filter(move |_| local_only)
+            .chain(
+                UserWorkspaces::as_ref(app)
+                    .feature_model_choice_for_team_uid(team_uid)
+                    .agent_mode
+                    .choices
+                    .iter()
+                    // Gate cloud/team routers behind the same flag as local routers so
+                    // the entire custom-router feature is controlled by one flag.
+                    .filter(move |_| !local_only)
+                    .filter(move |llm| {
+                        routers_enabled
+                            || !custom_model_routers::is_cloud_custom_router_id(llm.id.as_str())
+                    })
+                    .chain(self.custom_llm_choices(app).filter(move |_| !local_only))
+                    .chain(self.custom_router_choices().filter(move |_| !local_only)),
+            )
     }
 
     #[cfg(any(test, feature = "test-util"))]
