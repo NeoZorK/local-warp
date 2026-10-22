@@ -466,30 +466,58 @@ fn append_action_result(result: &AIAgentActionResult, messages: &mut Vec<Value>)
 }
 
 fn has_computer_use_approval(params: &RequestParams) -> bool {
-    if params.input.iter().any(|input| matches!(
-        input,
-        AIAgentInput::ActionResult {
-            result: AIAgentActionResult {
-                result: AIAgentActionResultType::RequestComputerUse(RequestComputerUseResult::Approved { .. }),
-                ..
-            },
-            ..
+    // A user grant is scoped to the current task: a new user prompt invalidates an
+    // older approval. This is stricter than trusting any historical approval forever.
+    let mut position = 0usize;
+    let mut latest_user_query_position: Option<usize> = None;
+    let mut latest_permission_result: Option<(usize, bool)> = None;
+
+    for task in &params.tasks {
+        for message in &task.messages {
+            position += 1;
+            match message.message.as_ref() {
+                Some(api::message::Message::UserQuery(_)) => {
+                    latest_user_query_position = Some(position);
+                }
+                Some(api::message::Message::ToolCallResult(result)) => {
+                    if let Some(api::message::tool_call_result::Result::RequestComputerUseResult(request)) =
+                        result.result.as_ref()
+                    {
+                        let approved = matches!(
+                            request.result.as_ref(),
+                            Some(api::message::tool_call_result::request_computer_use_result::Result::Approved(_))
+                        );
+                        latest_permission_result = Some((position, approved));
+                    }
+                }
+                _ => {}
+            }
         }
-    )) {
-        return true;
     }
-    params.tasks.iter().any(|task| task.messages.iter().any(|message| {
-        let Some(api::message::Message::ToolCallResult(result)) = message.message.as_ref() else {
-            return false;
-        };
-        let Some(api::message::tool_call_result::Result::RequestComputerUseResult(request)) = result.result.as_ref() else {
-            return false;
-        };
-        matches!(
-            request.result.as_ref(),
-            Some(api::message::tool_call_result::request_computer_use_result::Result::Approved(_))
-        )
-    }))
+
+    // Current inputs follow persisted history, and therefore have later positions.
+    for input in &params.input {
+        position += 1;
+        match input {
+            AIAgentInput::UserQuery { .. }
+            | AIAgentInput::AutoCodeDiffQuery { .. }
+            | AIAgentInput::ResumeConversation { .. } => {
+                latest_user_query_position = Some(position);
+            }
+            AIAgentInput::ActionResult { result, .. } => {
+                if let AIAgentActionResultType::RequestComputerUse(permission) = &result.result {
+                    let approved = matches!(permission, RequestComputerUseResult::Approved { .. });
+                    latest_permission_result = Some((position, approved));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    latest_permission_result.is_some_and(|(permission_position, approved)| {
+        approved
+            && latest_user_query_position.is_none_or(|query_position| query_position < permission_position)
+    })
 }
 
 fn local_tools(computer_use_enabled: bool, computer_approved: bool) -> Vec<Value> {
