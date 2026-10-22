@@ -391,6 +391,15 @@ impl Client {
 
     /// Core request execution logic shared by all platforms.
     async fn execute_inner(&self, request: Request) -> reqwest::Result<Response> {
+        if !is_allowed_local_offline_url(request.wrapped.url()) {
+            log::warn!(
+                "Blocked outbound HTTP request in local offline mode: {}",
+                request.wrapped.url().origin()
+            );
+            // Return a local URL-parse error without trying DNS or opening a socket.
+            return self.wrapped.get("http://").send().await.map(Response);
+        }
+
         let Request {
             wrapped: request,
             serialized_payload,
@@ -421,6 +430,31 @@ impl Client {
 
         Ok(Response(result))
     }
+}
+
+/// Allows only the explicitly configured loopback OptiQ API when the offline flag is set.
+/// This gate runs before HTTP requests are sent, preventing DNS lookups or socket attempts to Warp
+/// and third-party servers. The macOS Seatbelt launcher is an independent second boundary.
+fn is_allowed_local_offline_url(url: &reqwest::Url) -> bool {
+    if !warp_core::telemetry::is_local_offline_mode() {
+        return true;
+    }
+    if url.scheme() != "http" || url.host_str() != Some("127.0.0.1") {
+        return false;
+    }
+    let base = std::env::var("OPTIQ_BASE_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:9163/v1".to_owned());
+    let Ok(base) = reqwest::Url::parse(&base) else {
+        return false;
+    };
+    if base.scheme() != "http"
+        || base.host_str() != Some("127.0.0.1")
+        || base.port_or_known_default() != url.port_or_known_default()
+    {
+        return false;
+    }
+    let path = base.path().trim_end_matches('/');
+    url.path() == path || url.path().starts_with(&format!("{path}/"))
 }
 
 fn is_warp_server_origin(url: &reqwest::Url) -> bool {
@@ -520,6 +554,23 @@ impl<'a> RequestBuilder<'a> {
     /// Sends the request to the endpoint, which is assumed to be a streaming server-sent-events
     /// endpoint, and returns a corresponding `EventSource`.
     pub fn eventsource(self) -> EventSourceStream {
+        if warp_core::telemetry::is_local_offline_mode() {
+            let allowed = self
+                .wrapped
+                .try_clone()
+                .and_then(|builder| builder.build().ok())
+                .is_some_and(|request| is_allowed_local_offline_url(request.url()));
+            if !allowed {
+                log::warn!("Blocked outbound SSE request in local offline mode");
+                return cfg_if::cfg_if! {
+                    if #[cfg(target_family = "wasm")] {
+                        futures::stream::empty::<Result<reqwest_eventsource::Event, reqwest_eventsource::Error>>().boxed_local()
+                    } else {
+                        futures::stream::empty::<Result<reqwest_eventsource::Event, reqwest_eventsource::Error>>().boxed()
+                    }
+                };
+            }
+        }
         cfg_if::cfg_if! {
             if #[cfg(target_family = "wasm")] {
                 let mut stream = self
