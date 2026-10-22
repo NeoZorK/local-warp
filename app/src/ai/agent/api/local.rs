@@ -970,11 +970,11 @@ fn parse_use_computer(arguments: &Value) -> anyhow::Result<api::message::tool_ca
                 to: Some(api::Coordinates { x, y }),
             }),
             "mouse_down" => ActionType::MouseDown(api::message::tool_call::use_computer::action::MouseDown {
-                button: mouse_button(action),
+                button: mouse_button(action)?,
                 at: Some(api::Coordinates { x, y }),
             }),
             "mouse_up" => ActionType::MouseUp(api::message::tool_call::use_computer::action::MouseUp {
-                button: mouse_button(action),
+                button: mouse_button(action)?,
             }),
             "mouse_wheel" => {
                 let direction = match action.get("direction").and_then(Value::as_str).unwrap_or("down") {
@@ -1005,7 +1005,7 @@ fn parse_use_computer(arguments: &Value) -> anyhow::Result<api::message::tool_ca
                 text: string_arg(action, "text")?,
             }),
             "key_down" => ActionType::KeyDown(api::message::tool_call::use_computer::action::KeyDown {
-                key: Some(parse_computer_key(&string_arg(action, "key")?)),
+                key: Some(parse_computer_key(&string_arg(action, "key")?)?),
             }),
             "key_up" => ActionType::KeyUp(api::message::tool_call::use_computer::action::KeyUp {
                 key: Some(parse_computer_key(&string_arg(action, "key")?)),
@@ -1030,16 +1030,18 @@ fn parse_use_computer(arguments: &Value) -> anyhow::Result<api::message::tool_ca
     })
 }
 
-fn mouse_button(action: &Value) -> i32 {
+fn mouse_button(action: &Value) -> anyhow::Result<i32> {
     match action.get("button").and_then(Value::as_str).unwrap_or("left") {
-        "left" => 0,
-        "right" => 1,
-        "middle" => 2,
-        _ => 0,
+        "left" => Ok(0),
+        "right" => Ok(1),
+        "middle" => Ok(2),
+        _ => bail!("Unsupported mouse button; refusing to guess a potentially destructive click"),
     }
 }
 
-fn parse_computer_key(key: &str) -> api::message::tool_call::use_computer::action::Key {
+fn parse_computer_key(
+    key: &str,
+) -> anyhow::Result<api::message::tool_call::use_computer::action::Key> {
     use api::message::tool_call::use_computer::action::key::Data;
     let data = if key.chars().count() == 1 {
         Data::Char(key.to_owned())
@@ -1055,11 +1057,11 @@ fn parse_computer_key(key: &str) -> api::message::tool_call::use_computer::actio
             "right" => 124,
             "down" => 125,
             "up" => 126,
-            _ => 36,
+            _ => bail!("Unsupported computer key '{key}'; refusing to substitute a different key"),
         };
         Data::Keycode(keycode)
     };
-    api::message::tool_call::use_computer::action::Key { data: Some(data) }
+    Ok(api::message::tool_call::use_computer::action::Key { data: Some(data) })
 }
 
 fn parse_tool_arguments(value: Option<&Value>) -> anyhow::Result<Value> {
