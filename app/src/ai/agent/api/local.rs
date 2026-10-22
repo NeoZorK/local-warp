@@ -619,13 +619,22 @@ fn append_history(tasks: &[api::Task], messages: &mut Vec<Value>) {
                     }
                 }
                 Some(api::message::Message::ToolCallResult(result)) => {
-                    let text = local_tool_result_text(result);
-                    messages.push(json!({
-                        "role":"tool",
-                        "tool_call_id": result.tool_call_id,
-                        "content": truncate(&text, MAX_TOOL_RESULT_CHARS)
-                    }));
-                    emitted += 1;
+                    // Skip unsupported cloud-only results inherited from pre-offline conversations.
+                    let has_supported_call = messages.iter().any(|message| {
+                        message.get("role").and_then(Value::as_str) == Some("assistant")
+                            && message.get("tool_calls").and_then(Value::as_array).is_some_and(|calls| {
+                                calls.iter().any(|call| call.get("id").and_then(Value::as_str) == Some(result.tool_call_id.as_str()))
+                            })
+                    });
+                    if has_supported_call {
+                        let text = local_tool_result_text(result);
+                        messages.push(json!({
+                            "role":"tool",
+                            "tool_call_id": result.tool_call_id,
+                            "content": truncate(&text, MAX_TOOL_RESULT_CHARS)
+                        }));
+                        emitted += 1;
+                    }
                 }
                 Some(api::message::Message::AgentReasoning(reasoning)) if !reasoning.reasoning.is_empty() => {
                     messages.push(json!({"role":"assistant","content": truncate(&reasoning.reasoning, 2_000)}));
@@ -657,7 +666,10 @@ fn append_current_inputs(
                 }
             }
             AIAgentInput::ActionResult { result, .. } => {
-                if !history_has_tool_result(tasks, &result.id.to_string()) {
+                let action_id = result.id.to_string();
+                if !history_has_tool_result(tasks, &action_id)
+                    && history_has_supported_tool_call(tasks, &action_id)
+                {
                     append_action_result(result, messages);
                 }
             }
@@ -671,6 +683,15 @@ fn append_current_inputs(
             _ => {}
         }
     }
+}
+
+fn history_has_supported_tool_call(tasks: &[api::Task], action_id: &str) -> bool {
+    tasks.iter().any(|task| task.messages.iter().any(|message| {
+        let Some(api::message::Message::ToolCall(call)) = message.message.as_ref() else {
+            return false;
+        };
+        call.tool_call_id == action_id && local_tool_from_proto(call).is_some()
+    }))
 }
 
 fn history_has_tool_result(tasks: &[api::Task], action_id: &str) -> bool {
@@ -1153,6 +1174,58 @@ fn bound_messages(messages: &mut Vec<Value>) {
             }
         }
     }
+    sanitize_tool_history(messages);
+}
+
+/// Remove orphan tool messages left by truncated or unsupported pre-offline history.
+fn sanitize_tool_history(messages: &mut Vec<Value>) {
+    let completed_tool_ids: HashSet<String> = messages
+        .iter()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+        .filter_map(|message| message.get("tool_call_id").and_then(Value::as_str).map(str::to_owned))
+        .collect();
+
+    let mut valid_tool_ids = HashSet::new();
+    for message in messages.iter() {
+        if message.get("role").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let Some(calls) = message.get("tool_calls").and_then(Value::as_array) else {
+            continue;
+        };
+        if calls.iter().all(|call| {
+            call.get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| completed_tool_ids.contains(id))
+        }) {
+            for call in calls {
+                if let Some(id) = call.get("id").and_then(Value::as_str) {
+                    valid_tool_ids.insert(id.to_owned());
+                }
+            }
+        }
+    }
+
+    messages.retain(|message| {
+        let role = message.get("role").and_then(Value::as_str);
+        if role == Some("tool") {
+            return message
+                .get("tool_call_id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| valid_tool_ids.contains(id));
+        }
+        if role == Some("assistant") && message.get("tool_calls").is_some() {
+            return message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .is_some_and(|calls| calls.iter().all(|call| {
+                    call.get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| valid_tool_ids.contains(id))
+                }));
+        }
+        true
+    });
 }
 
 fn truncate(value: &str, limit: usize) -> String {
