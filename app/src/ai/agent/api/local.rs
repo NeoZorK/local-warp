@@ -75,7 +75,7 @@ impl Drop for LocalFeedbackRegistration {
             .get(&self.task_id)
             .is_some_and(|registration| registration.token == self.token)
         {
-            registry.remove(&self.task_id);
+            let _ = registry.remove(&self.task_id);
         }
     }
 }
@@ -85,7 +85,7 @@ fn register_local_action_results(
     sender: LocalActionResultSender,
 ) -> LocalFeedbackRegistration {
     let token = Uuid::new_v4();
-    local_action_result_registry().lock().insert(
+    let _ = local_action_result_registry().lock().insert(
         task_id.to_owned(),
         LocalActionResultRegistration { token, sender },
     );
@@ -1018,8 +1018,10 @@ fn parse_use_computer(arguments: &Value) -> anyhow::Result<api::message::tool_ca
     anyhow::ensure!(requested.len() <= 30, "Refusing more than 30 computer actions in one call");
     for action in requested {
         let kind = action.get("type").and_then(Value::as_str).ok_or_else(|| anyhow!("computer action has no type"))?;
-        let x = action.get("x").and_then(Value::as_i64).unwrap_or(0) as i32;
-        let y = action.get("y").and_then(Value::as_i64).unwrap_or(0) as i32;
+        let x = action.get("x").and_then(Value::as_i64).unwrap_or(0)
+            .clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+        let y = action.get("y").and_then(Value::as_i64).unwrap_or(0)
+            .clamp(i32::MIN as i64, i32::MAX as i64) as i32;
         let typ = match kind {
             "mouse_move" => ActionType::MouseMove(api::message::tool_call::use_computer::action::MouseMove {
                 to: Some(api::Coordinates { x, y }),
@@ -1043,7 +1045,9 @@ fn parse_use_computer(arguments: &Value) -> anyhow::Result<api::message::tool_ca
                     at: Some(api::Coordinates { x, y }),
                     direction,
                     distance: action.get("pixels").and_then(Value::as_i64).map(|pixels| {
-                        api::message::tool_call::use_computer::action::mouse_wheel::Distance::Pixels(pixels as i32)
+                        api::message::tool_call::use_computer::action::mouse_wheel::Distance::Pixels(
+                                pixels.clamp(-10_000, 10_000) as i32
+                            )
                     }),
                 })
             }
