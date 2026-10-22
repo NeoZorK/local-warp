@@ -1,0 +1,8 @@
+; Offline profile for the Warp fork and all child processes.
+; External TCP/UDP/DNS access is denied. Local OptiQ HTTP is allowed through loopback.
+; AF_UNIX sockets remain allowed for local IPC.
+(version 1)
+(allow default)
+(deny network*)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-outbound (to unix-socket))
