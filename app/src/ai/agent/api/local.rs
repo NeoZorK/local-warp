@@ -5,7 +5,8 @@
 //! existing local action executors consume, so file, shell, and approved computer-use actions
 //! continue through Warp's existing UI/permission path.
 
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, OnceLock};
 use std::time::SystemTime;
 
 use anyhow::{Context as _, anyhow, bail};
@@ -28,6 +29,53 @@ const DEFAULT_MODEL_ID: &str = "mlx-community/Qwen3.5-9B-OptiQ-4bit";
 const MAX_CONTEXT_CHARS: usize = 48_000;
 const MAX_TOOL_RESULT_CHARS: usize = 8_000;
 const MAX_HISTORY_MESSAGES: usize = 60;
+
+const MAX_AGENT_ITERATIONS: usize = 32;
+const MAX_TOTAL_TOOL_CALLS: usize = 96;
+
+type LocalActionResultSender = async_channel::Sender<Arc<AIAgentActionResult>>;
+
+fn local_action_result_registry(
+) -> &'static parking_lot::Mutex<HashMap<String, LocalActionResultSender>> {
+    static REGISTRY: OnceLock<parking_lot::Mutex<HashMap<String, LocalActionResultSender>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(|| parking_lot::Mutex::new(HashMap::new()))
+}
+
+/// Called by Warp's normal action executor after an approved local tool has finished.
+/// The result is delivered to the local model loop for the same MAA task.
+pub(crate) fn forward_local_action_result(result: Arc<AIAgentActionResult>) {
+    if !warp_core::telemetry::is_local_offline_mode() {
+        return;
+    }
+    let task_id = result.task_id.to_string();
+    let sender = local_action_result_registry().lock().get(&task_id).cloned();
+    if let Some(sender) = sender {
+        let _ = sender.try_send(result);
+    }
+}
+
+struct LocalFeedbackRegistration {
+    task_id: String,
+}
+
+impl Drop for LocalFeedbackRegistration {
+    fn drop(&mut self) {
+        local_action_result_registry().lock().remove(&self.task_id);
+    }
+}
+
+fn register_local_action_results(
+    task_id: &str,
+    sender: LocalActionResultSender,
+) -> LocalFeedbackRegistration {
+    local_action_result_registry()
+        .lock()
+        .insert(task_id.to_owned(), sender);
+    LocalFeedbackRegistration {
+        task_id: task_id.to_owned(),
+    }
+}
 
 /// A native Warp response stream backed entirely by the local OptiQ server.
 pub(crate) async fn generate_local_multi_agent_output(
