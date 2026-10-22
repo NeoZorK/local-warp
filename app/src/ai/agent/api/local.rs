@@ -19,6 +19,7 @@ use warp_multi_agent_api as api;
 use ai::agent::action_result::{RequestComputerUseResult, ScreenshotSource, UseComputerResult};
 use crate::ai::agent::{AIAgentActionResult, AIAgentActionResultType, AIAgentInput};
 use crate::server::server_api::AIApiError;
+use crate::terminal::model::session::SessionType;
 
 use super::{Event, RequestParams, ResponseStream};
 
@@ -48,6 +49,10 @@ async fn run_local_turn(params: RequestParams) -> anyhow::Result<Vec<api::Respon
     anyhow::ensure!(
         warp_core::telemetry::is_local_offline_mode(),
         "The native local Agent backend must be launched with WARP_LOCAL_OFFLINE=1"
+    );
+    anyhow::ensure!(
+        matches!(params.session_context.session_type(), None | Some(SessionType::Local)),
+        "Local Qwen mode only supports local Warp sessions; switch away from a remote session."
     );
 
     let base_url = local_base_url()?;
