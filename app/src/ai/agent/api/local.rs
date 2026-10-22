@@ -1186,8 +1186,23 @@ fn local_tool_result_text(result: &api::message::ToolCallResult) -> String {
         Some(ToolResult::Grep(value)) => format!("{value:?}"),
         Some(ToolResult::FileGlobV2(value)) => format!("{value:?}"),
         Some(ToolResult::SearchCodebase(value)) => format!("{value:?}"),
-        Some(ToolResult::RequestComputerUseResult(value)) => format!("{value:?}"),
-        Some(ToolResult::UseComputer(value)) => "Local computer-use action completed.".to_owned(),
+        Some(ToolResult::RequestComputerUseResult(value)) => {
+            use api::message::tool_call_result::request_computer_use_result::Result as PermissionResult;
+            match value.result.as_ref() {
+                Some(PermissionResult::Approved(_)) => "Computer-use permission approved.".to_owned(),
+                Some(PermissionResult::Rejected(_)) => "Computer-use permission rejected by the user.".to_owned(),
+                Some(PermissionResult::Error(error)) => format!("Computer-use permission error: {}", error.message),
+                None => "Computer-use permission returned no result.".to_owned(),
+            }
+        }
+        Some(ToolResult::UseComputer(value)) => {
+            use api::message::tool_call_result::use_computer_result::Result as ComputerResult;
+            match value.result.as_ref() {
+                Some(ComputerResult::Success(_)) => "Local computer-use actions completed.".to_owned(),
+                Some(ComputerResult::Error(error)) => format!("Local computer-use error: {}", error.message),
+                None => "Local computer-use returned no result.".to_owned(),
+            }
+        },
         Some(other) => format!("Local tool result: {other:?}"),
         None => "Local tool produced no result.".to_owned(),
     }
