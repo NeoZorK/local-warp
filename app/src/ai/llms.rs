@@ -1182,6 +1182,11 @@ impl LLMPreferences {
         scope: &S,
         app: &'a AppContext,
     ) -> impl Iterator<Item = &'a LLMInfo> + use<'a, S> {
+        let local_only = warp_core::telemetry::is_local_offline_mode();
+        let local_model: &'a LLMInfo = local_qwen_llm_info();
+        if local_only {
+            return std::iter::once(local_model).chain(std::iter::empty());
+        }
         // Don't show admin-disabled models in the dropdown
         let routers_enabled = FeatureFlag::CustomModelRouters.is_enabled();
         UserWorkspaces::as_ref(app)
@@ -1204,6 +1209,11 @@ impl LLMPreferences {
         scope: &S,
         app: &'a AppContext,
     ) -> impl Iterator<Item = &'a LLMInfo> + use<'a, S> {
+        let local_only = warp_core::telemetry::is_local_offline_mode();
+        let local_model: &'a LLMInfo = local_qwen_llm_info();
+        if local_only {
+            return std::iter::once(local_model).chain(std::iter::empty());
+        }
         // Don't show admin-disabled models in the dropdown
         self.get_cli_agent_available(scope.team_uid(), app)
             .choices
@@ -1228,6 +1238,9 @@ impl LLMPreferences {
         app: &'a AppContext,
         terminal_view_id: Option<EntityId>,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         let profile = AIExecutionProfilesModel::as_ref(app).active_profile(terminal_view_id, app);
 
         let available = self.get_cli_agent_available(team_uid, app);
@@ -1250,6 +1263,9 @@ impl LLMPreferences {
         scope: &(impl TeamScope + ?Sized),
         app: &'a AppContext,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         self.fallback_llm_info(self.get_cli_agent_available(scope.team_uid(), app), app)
     }
 
@@ -1258,6 +1274,9 @@ impl LLMPreferences {
         team_uid: Option<ServerId>,
         app: &'a AppContext,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         self.fallback_llm_info(self.get_cli_agent_available(team_uid, app), app)
     }
 
@@ -1281,6 +1300,11 @@ impl LLMPreferences {
         scope: &(impl TeamScope + ?Sized),
         app: &'a AppContext,
     ) -> impl Iterator<Item = &'a LLMInfo> {
+        let local_only = warp_core::telemetry::is_local_offline_mode();
+        let local_model: &'a LLMInfo = local_qwen_llm_info();
+        if local_only {
+            return std::iter::once(local_model).chain(std::iter::empty());
+        }
         self.get_computer_use_available(scope.team_uid(), app)
             .choices
             .iter()
@@ -1317,6 +1341,9 @@ impl LLMPreferences {
         scope: &(impl TeamScope + ?Sized),
         app: &'a AppContext,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         let available = self.get_computer_use_available(scope.team_uid(), app);
         available
             .usable_default_llm_info(app)
@@ -1328,6 +1355,9 @@ impl LLMPreferences {
         team_uid: Option<ServerId>,
         app: &'a AppContext,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         let available = self.get_computer_use_available(team_uid, app);
         available
             .usable_default_llm_info(app)
