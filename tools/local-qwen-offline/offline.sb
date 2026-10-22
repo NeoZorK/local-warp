@@ -1,8 +1,7 @@
-; Offline profile for the Warp fork and all child processes.
-; External TCP/UDP/DNS access is denied. Local OptiQ HTTP is allowed through loopback.
-; AF_UNIX sockets remain allowed for local IPC.
+; Strict macOS Seatbelt network policy for native local Qwen mode.
+; Only outbound IPv4 loopback is allowed, for the local MLX OptiQ HTTP endpoint.
+; External TCP/UDP, DNS, inbound network, and Unix-domain socket networking are denied.
 (version 1)
 (allow default)
 (deny network*)
-(allow network-outbound (remote ip "localhost:*"))
-(allow network-outbound (to unix-socket))
+(allow network-outbound (remote ip "127.0.0.1:*"))
