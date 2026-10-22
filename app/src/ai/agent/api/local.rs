@@ -1008,7 +1008,7 @@ fn parse_use_computer(arguments: &Value) -> anyhow::Result<api::message::tool_ca
                 key: Some(parse_computer_key(&string_arg(action, "key")?)?),
             }),
             "key_up" => ActionType::KeyUp(api::message::tool_call::use_computer::action::KeyUp {
-                key: Some(parse_computer_key(&string_arg(action, "key")?)),
+                key: Some(parse_computer_key(&string_arg(action, "key")?)?),
             }),
             other => bail!("Unsupported computer action: {other}"),
         };
