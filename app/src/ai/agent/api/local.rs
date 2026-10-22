@@ -254,9 +254,10 @@ fn local_base_url() -> anyhow::Result<String> {
     let parsed = Url::parse(&value).context("Invalid OPTIQ_BASE_URL")?;
     anyhow::ensure!(parsed.scheme() == "http", "OptiQ must use plain HTTP on loopback; TLS is not needed locally");
     let host = parsed.host_str().unwrap_or_default();
-    let is_loopback = host.eq_ignore_ascii_case("localhost")
-        || host == "127.0.0.1";
-    anyhow::ensure!(is_loopback, "Refusing non-loopback OptiQ URL: {host}");
+    anyhow::ensure!(
+        host == "127.0.0.1",
+        "Strict offline mode only permits OPTIQ_BASE_URL on 127.0.0.1; got {host}"
+    );
     anyhow::ensure!(
         parsed.query().is_none() && parsed.username().is_empty() && parsed.password().is_none(),
         "OPTIQ_BASE_URL must not contain credentials or query parameters"
