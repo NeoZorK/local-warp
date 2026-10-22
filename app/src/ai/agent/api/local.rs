@@ -11,7 +11,6 @@ use std::time::SystemTime;
 
 use anyhow::{Context as _, anyhow, bail};
 use base64::Engine as _;
-use futures::stream;
 use serde_json::{Value, json};
 use url::Url;
 use uuid::Uuid;
@@ -90,7 +89,7 @@ pub(crate) async fn generate_local_multi_agent_output(
         let cancellation = cancellation_rx.fuse();
         futures::pin_mut!(cancellation);
 
-        let setup = (|| -> anyhow::Result<(String, String, String, String, String, String, bool)> {
+        let setup = (|| -> anyhow::Result<(String, String, String, String, String, bool)> {
             anyhow::ensure!(
                 warp_core::telemetry::is_local_offline_mode(),
                 "The native local Agent backend must be launched with WARP_LOCAL_OFFLINE=1"
@@ -124,10 +123,10 @@ pub(crate) async fn generate_local_multi_agent_output(
                 .unwrap_or_else(|| Uuid::new_v4().to_string());
             let create_root_task = !params.tasks.iter().any(|task| task.id == task_id);
 
-            Ok((base_url, request_id, conversation_id, run_id, task_id, String::new(), create_root_task))
+            Ok((base_url, request_id, conversation_id, run_id, task_id, create_root_task))
         })();
 
-        let (base_url, request_id, conversation_id, run_id, task_id, _reserved, create_root_task) =
+        let (base_url, request_id, conversation_id, run_id, task_id, create_root_task) =
             match setup {
                 Ok(values) => values,
                 Err(error) => {
