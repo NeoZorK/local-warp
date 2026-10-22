@@ -1387,7 +1387,13 @@ impl BlocklistAIActionModel {
         self.finished_action_results
             .entry(conversation_id)
             .or_default()
-            .push(action_result);
+            .push(action_result.clone());
+
+        // In native local-Qwen mode, the same result is also delivered directly to
+        // the in-process model loop. The ordinary Warp action executor above still
+        // owns permissions, execution, cancellation, and result presentation.
+        crate::ai::agent::api::local::forward_local_action_result(action_result);
+
         self.recording_spans_by_conversation
             .get_mut()
             .remove(&conversation_id);
