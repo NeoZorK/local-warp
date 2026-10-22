@@ -282,6 +282,37 @@ pub const MODELS_BY_FEATURE_CACHE_KEY: &str = "AvailableLLMs";
 const CUSTOM_ENDPOINT_USAGE_FALLBACK_LABEL: &str = "Custom endpoint";
 const CLOUD_FALLBACK_OZ_MODEL_ID: &str = "auto";
 
+const LOCAL_QWEN_MODEL_ID: &str = "local-qwen-9b-optiq";
+
+/// Metadata shown by Warp's own model picker when WARP_LOCAL_OFFLINE=1.
+/// The local Agent backend always sends inference to MLX OptiQ on loopback.
+pub fn local_qwen_llm_info() -> &'static LLMInfo {
+    static MODEL: OnceLock<LLMInfo> = OnceLock::new();
+    MODEL.get_or_init(|| LLMInfo {
+        display_name: "Local Qwen 9B MLX OptiQ".to_owned(),
+        base_model_name: "Qwen3.5-9B-OptiQ-4bit".to_owned(),
+        id: LLMId::from(LOCAL_QWEN_MODEL_ID),
+        reasoning_level: None,
+        usage_metadata: LLMUsageMetadata {
+            request_multiplier: 0,
+            credit_multiplier: None,
+        },
+        description: Some("Runs locally on this Mac through MLX OptiQ. Warp cloud inference is disabled.".to_owned()),
+        disable_reason: None,
+        vision_supported: true,
+        spec: None,
+        provider: LLMProvider::Unknown,
+        host_configs: HashMap::new(),
+        discount_percentage: None,
+        context_window: LLMContextWindow {
+            is_configurable: false,
+            min: 0,
+            max: 32768,
+            default_max: 32768,
+        },
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LLMUsageMetadata {
     pub request_multiplier: usize,
