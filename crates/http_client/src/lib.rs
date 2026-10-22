@@ -400,8 +400,12 @@ impl Client {
                 "Blocked outbound HTTP request in local offline mode: {}",
                 request.wrapped.url().host_str().unwrap_or("<unknown>")
             );
-            // Return a local URL-parse error without trying DNS or opening a socket.
-            return self.wrapped.get("http://").send().await.map(Response);
+            // Construct an invalid request locally to produce a normal reqwest error.
+            // Never call send() on the blocked URL: the gate must not open any socket.
+            return match self.wrapped.get("http://").build() {
+                Err(error) => Err(error),
+                Ok(_) => unreachable!("an HTTP URL without a host must fail to parse"),
+            };
         }
 
         let Request {
