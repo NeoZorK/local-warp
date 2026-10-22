@@ -12,6 +12,7 @@ use warpui_core::{AppContext, Entity, SingletonEntity};
 use crate::channel::{Channel, ChannelState};
 use crate::features::FeatureFlag;
 
+/// True when this process is running in the strict local/offline profile.\n/// Telemetry events are neither queued nor emitted in this mode.\npub fn is_local_offline_mode() -> bool {\n    std::env::var_os("WARP_LOCAL_OFFLINE").is_some()\n}\n
 /// Core trait defining telemetry event behavior.
 ///
 /// This trait encapsulates the basic functionality required for any telemetry event
@@ -149,7 +150,7 @@ macro_rules! send_telemetry_from_ctx {
         #[allow(unused_imports)]
         use warp_core::telemetry::TelemetryEvent as _;
         let event = $event;
-        if event.enablement_state().is_enabled() {
+        if !$crate::telemetry::is_local_offline_mode() && event.enablement_state().is_enabled() {
             let auth_state =
                 <$crate::telemetry::TelemetryContextModel as $crate::warpui_core::SingletonEntity>::handle($ctx)
                     .as_ref($ctx);
