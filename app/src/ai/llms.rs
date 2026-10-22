@@ -1006,6 +1006,9 @@ impl LLMPreferences {
         app: &'a AppContext,
         terminal_view_id: Option<EntityId>,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         self.get_active_profile_base_model_for_team_uid(scope.team_uid(), app, terminal_view_id)
     }
 
@@ -1015,6 +1018,9 @@ impl LLMPreferences {
         app: &'a AppContext,
         terminal_view_id: Option<EntityId>,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         let profile = AIExecutionProfilesModel::as_ref(app).active_profile(terminal_view_id, app);
         let models_by_feature =
             UserWorkspaces::as_ref(app).feature_model_choice_for_team_uid(team_uid);
