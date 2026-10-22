@@ -91,7 +91,7 @@ export all_proxy=''
 printf '\nNative local Warp Agent\n'
 printf '  OptiQ endpoint: %s\n' "$OPTIQ_BASE_URL"
 printf '  Model ID:       %s (auto-discovered from /v1/models unless OPTIQ_MODEL_ID is set)\n' "${OPTIQ_MODEL_ID:-auto}"
-printf '  Network:        127.0.0.1:%s only; external connections denied by macOS sandbox\n' "$OPTIQ_PORT"
+printf '  Warp process tree: 127.0.0.1:%s only; external connections denied by macOS sandbox\n' "$OPTIQ_PORT"
 printf '  Web search:     disabled\n'
 printf '  Warp telemetry: disabled; queued telemetry is discarded\n\n'
 
