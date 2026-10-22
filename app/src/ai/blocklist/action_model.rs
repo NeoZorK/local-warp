@@ -1384,15 +1384,17 @@ impl BlocklistAIActionModel {
             }
         }
 
-        self.finished_action_results
-            .entry(conversation_id)
-            .or_default()
-            .push(action_result.clone());
-
-        // In native local-Qwen mode, the same result is also delivered directly to
-        // the in-process model loop. The ordinary Warp action executor above still
-        // owns permissions, execution, cancellation, and result presentation.
-        crate::ai::agent::api::local::forward_local_action_result(action_result);
+        let local_qwen_mode = warp_core::telemetry::is_local_offline_mode();
+        if local_qwen_mode {
+            // The native local model loop already awaits this result on the current stream.
+            // Do not also queue it for Warp's cloud-agent follow-up mechanism.
+            crate::ai::agent::api::local::forward_local_action_result(action_result);
+        } else {
+            self.finished_action_results
+                .entry(conversation_id)
+                .or_default()
+                .push(action_result);
+        }
 
         self.recording_spans_by_conversation
             .get_mut()
@@ -1413,8 +1415,12 @@ impl BlocklistAIActionModel {
             return;
         }
 
-        // The phase is fully drained — sort results back into original tool-call order.
-        self.sort_finished_results(conversation_id);
+        // The phase is fully drained — sort results for the next server-backed turn.
+        // Local Qwen consumes each result through the in-process channel above and must not
+        // enqueue a duplicate follow-up after its own response stream ends.
+        if !local_qwen_mode {
+            self.sort_finished_results(conversation_id);
+        }
 
         if self
             .pending_actions
