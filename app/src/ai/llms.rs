@@ -942,6 +942,9 @@ impl LLMPreferences {
         app: &'a AppContext,
         terminal_view_id: Option<EntityId>,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         self.get_preferred_base_model(scope, app, terminal_view_id)
     }
 
@@ -951,6 +954,9 @@ impl LLMPreferences {
         app: &'a AppContext,
         terminal_view_id: Option<EntityId>,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         let models_by_feature =
             UserWorkspaces::as_ref(app).feature_model_choice_for_team_uid(team_uid);
         if let Some(terminal_view_id) = terminal_view_id {
@@ -1072,6 +1078,9 @@ impl LLMPreferences {
         app: &'a AppContext,
         terminal_view_id: Option<EntityId>,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         self.get_preferred_coding_model(scope, app, terminal_view_id)
     }
 
@@ -1270,6 +1279,9 @@ impl LLMPreferences {
         app: &'a AppContext,
         terminal_view_id: Option<EntityId>,
     ) -> &'a LLMInfo {
+        if warp_core::telemetry::is_local_offline_mode() {
+            return local_qwen_llm_info();
+        }
         let profile = AIExecutionProfilesModel::as_ref(app).active_profile(terminal_view_id, app);
 
         let available = self.get_computer_use_available(scope.team_uid(), app);
@@ -1343,6 +1355,11 @@ impl LLMPreferences {
     /// Falls back to the user's custom-endpoint LLMs when the id isn't a server-known model
     /// id (e.g. when it's a `config_key` UUID).
     pub fn get_llm_info<'a>(&'a self, id: &LLMId, app: &'a AppContext) -> Option<&'a LLMInfo> {
+        if warp_core::telemetry::is_local_offline_mode()
+            && id.as_str() == LOCAL_QWEN_MODEL_ID
+        {
+            return Some(local_qwen_llm_info());
+        }
         let workspaces = UserWorkspaces::as_ref(app);
         workspaces
             .current_workspace()
