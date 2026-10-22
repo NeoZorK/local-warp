@@ -19,6 +19,10 @@ pub async fn generate_multi_agent_output(
     team_scope: RequestTeamScope,
     cancellation_rx: futures::channel::oneshot::Receiver<()>,
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
+    // In strict local mode never route the request through Warp's remote MAA API.
+    if warp_core::telemetry::is_local_offline_mode() {
+        return Ok(super::local::generate_local_multi_agent_output(params, cancellation_rx).await);
+    }
     let supported_tools = params
         .supported_tools_override
         .take()
