@@ -509,7 +509,7 @@ fn finished_event() -> api::ResponseEvent {
 }
 
 fn local_system_prompt() -> &'static str {
-    "You are the native local coding agent inside this Warp fork. All inference is performed by the local Qwen model through MLX OptiQ. Use the provided local tools for file reading, searching, edits, shell commands, and computer interaction. Never claim an action succeeded unless a tool result confirms it. Do not use web search, remote agents, external MCP servers, cloud APIs, or network access. Prefer small, reviewable diffs. Use edit_file for existing files and write_file only for new files. Request computer-use permission before using the computer; use_computer is only available after Warp reports that the user approved it. All shell commands and file edits still pass through Warp's own local execution and permission UI."
+    "You are the native local coding agent inside this Warp fork. All inference is performed by the local Qwen model through MLX OptiQ. Use the provided local tools for file reading, searching, edits, shell commands, and computer interaction. Never claim an action succeeded unless a tool result confirms it. Do not use web search, remote agents, external MCP servers, cloud APIs, or network access. Never open or control a browser or other network-enabled app in Computer Use; computer interaction must stay with local/offline applications. Prefer small, reviewable diffs. Use edit_file for existing files and write_file only for new files. Request computer-use permission before using the computer; use_computer is only available after Warp reports that the user approved it. All shell commands and file edits still pass through Warp's own local execution and permission UI."
 }
 
 fn local_base_url() -> anyhow::Result<String> {
@@ -860,13 +860,13 @@ fn local_tools(computer_use_enabled: bool, computer_approved: bool) -> Vec<Value
     ];
 
     if computer_use_enabled && !computer_approved {
-        tools.push(function_tool("request_computer_use", "Ask Warp to request permission for local computer control. The user must approve before using the screen, mouse, or keyboard.", json!({
+        tools.push(function_tool("request_computer_use", "Ask Warp to request permission for local computer control. The user must approve before using the screen, mouse, or keyboard. Only local/offline apps may be controlled; never use a browser or network-enabled app.", json!({
             "type":"object","properties":{"task_summary":{"type":"string"}},
             "required":["task_summary"],"additionalProperties":false
         })));
     }
     if computer_use_enabled && computer_approved {
-        tools.push(function_tool("use_computer", "Use Warp's existing local computer-use executor after user approval. Actions are applied to the local desktop; a screenshot is returned to this local model.", json!({
+        tools.push(function_tool("use_computer", "Use Warp's existing local computer-use executor after user approval. Use only local/offline applications; never open browsers or network-enabled apps. Actions are applied to the local desktop; a screenshot is returned to this local model.", json!({
             "type":"object","properties":{
                 "action_summary":{"type":"string"},
                 "actions":{"type":"array","items":{"type":"object","properties":{
