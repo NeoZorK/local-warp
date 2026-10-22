@@ -181,7 +181,11 @@ impl Client {
         Self::from_client_builder(client_builder).expect("should not fail to create client")
     }
 
-    pub fn from_client_builder(client_builder: reqwest::ClientBuilder) -> reqwest::Result<Self> {
+    pub fn from_client_builder(mut client_builder: reqwest::ClientBuilder) -> reqwest::Result<Self> {
+        if warp_core::telemetry::is_local_offline_mode() {
+            // A local endpoint must not redirect the request to a remote host.
+            client_builder = client_builder.redirect(reqwest::redirect::Policy::none());
+        }
         client_builder.build().map(|client| Self {
             wrapped: client,
             include_warp_headers: true,
@@ -394,7 +398,7 @@ impl Client {
         if !is_allowed_local_offline_url(request.wrapped.url()) {
             log::warn!(
                 "Blocked outbound HTTP request in local offline mode: {}",
-                request.wrapped.url().origin()
+                request.wrapped.url().host_str().unwrap_or("<unknown>")
             );
             // Return a local URL-parse error without trying DNS or opening a socket.
             return self.wrapped.get("http://").send().await.map(Response);
