@@ -490,7 +490,7 @@ pub(crate) async fn generate_local_multi_agent_output(
                 ) {
                     computer_approved = true;
                 }
-                pending_results.insert(result_id, result);
+                let _ = pending_results.insert(result_id, result);
             }
 
             // Preserve the model's original tool-call order even when Warp completes
