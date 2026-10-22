@@ -15,7 +15,8 @@ use crate::features::FeatureFlag;
 /// True when this process is running in the strict local/offline profile.
 pub fn is_local_offline_mode() -> bool {
     std::env::var_os("WARP_LOCAL_OFFLINE").is_some()
-}\n
+}
+
 /// Core trait defining telemetry event behavior.
 ///
 /// This trait encapsulates the basic functionality required for any telemetry event
