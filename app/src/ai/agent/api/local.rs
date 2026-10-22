@@ -681,9 +681,18 @@ fn history_has_tool_result(tasks: &[api::Task], action_id: &str) -> bool {
 }
 
 fn append_action_result(result: &AIAgentActionResult, messages: &mut Vec<Value>) {
+    let tool_id = result.id.to_string();
+    append_action_result_for_tool(result, &tool_id, messages);
+}
+
+fn append_action_result_for_tool(
+    result: &AIAgentActionResult,
+    model_tool_id: &str,
+    messages: &mut Vec<Value>,
+) {
     messages.push(json!({
         "role": "tool",
-        "tool_call_id": result.id.to_string(),
+        "tool_call_id": model_tool_id,
         "content": truncate(&result.to_string(), MAX_TOOL_RESULT_CHARS)
     }));
 
@@ -702,7 +711,7 @@ fn append_action_result(result: &AIAgentActionResult, messages: &mut Vec<Value>)
         messages.push(json!({
             "role": "user",
             "content": [
-                {"type":"text","text":"Latest screenshot from the local computer-use executor. Interpret it and continue only with approved computer-use actions."},
+                {"type":"text","text":"Latest screenshot from Warp's local computer-use executor. Use it to decide the next approved action."},
                 {"type":"image_url","image_url":{"url":format!("data:{mime_type};base64,{encoded}")}}
             ]
         }));
@@ -837,7 +846,11 @@ fn make_tool_call(
     let function = call.get("function").ok_or_else(|| anyhow!("tool call has no function object"))?;
     let name = function.get("name").and_then(Value::as_str).ok_or_else(|| anyhow!("tool call has no function name"))?;
     let arguments = parse_tool_arguments(function.get("arguments"))?;
-    let id = Uuid::new_v4().to_string();
+    let id = call
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(|value| Uuid::parse_str(value).ok().map(|_| value.to_owned()))
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
 
     use api::message::tool_call::Tool;
     let tool = match name {
