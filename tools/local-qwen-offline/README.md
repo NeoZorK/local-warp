@@ -1,48 +1,61 @@
-# Local Qwen Offline Mode (macOS)
+# Native Local Qwen Agent for Warp (macOS)
 
-This support package provides a **fail-closed offline launcher** for the Warp source build and configures OpenCode as a local ACP agent backed by MLX OptiQ.
+This branch adds a native in-process local Agent Mode backend. In WARP_LOCAL_OFFLINE=1 mode, app/src/ai/agent/api/impl.rs routes requests to app/src/ai/agent/api/local.rs instead of Warp's remote MAA endpoint. The backend sends OpenAI Chat Completions requests directly to a loopback-only MLX OptiQ endpoint and returns native Warp task/tool events.
 
-## Security behavior
+## Start
 
-- Requires macOS `sandbox-exec`; it refuses to launch if the OS sandbox is unavailable.
-- The sandbox denies network operations by default and allows outbound connections only to loopback (for example, `127.0.0.1:9163`) plus local Unix sockets.
-- It probes the OptiQ `/v1/models` endpoint through the same sandbox and aborts if an external HTTP probe succeeds.
-- Sets `WARP_LOCAL_OFFLINE=1`. The Warp telemetry macros stop enqueueing events; the telemetry collector clears in-memory/persisted queues and does not flush or save telemetry in this mode.
-- OpenCode is configured with `websearch=false`, `webfetch=deny`, and `task=deny`; external providers are disabled. Shell commands require approval.
-- Model requests are sent to the local OptiQ server, not to Warp's inference API.
+1. Start your local MLX OptiQ server and confirm http://127.0.0.1:9163/v1/models responds.
+2. From the root of this checkout, build the fork once with locally cached dependencies:
 
-## Requirements
+```bash
+cargo build --offline -p warp --bin warp
+```
 
-1. A locally built Warp binary at `target/debug/warp` (or set `WARP_BIN` to the exact binary path).
-2. `mlx-optiq` running on the Mac and serving `http://127.0.0.1:9163/v1/models`.
-3. OpenCode installed. Its ACP adapter is enabled in this fork by `app/src/ai/agent_sdk/driver/harness/acp/manifest.rs`.
-4. Dependencies already cached for offline builds. Build once with `cargo build --offline -p warp` before launching.
-
-## Run
-
-From the repository root:
+3. Launch through the network-isolating wrapper:
 
 ```bash
 chmod +x tools/local-qwen-offline/run-local-qwen.sh
 tools/local-qwen-offline/run-local-qwen.sh
 ```
 
-If OptiQ's model ID cannot be discovered, set it explicitly:
+Useful environment overrides:
 
 ```bash
-OPTIQ_MODEL_ID='your-exact-id-from-v1-models' tools/local-qwen-offline/run-local-qwen.sh
+OPTIQ_BASE_URL='http://127.0.0.1:9163/v1' \
+OPTIQ_MODEL_ID='your-exact-model-id-from-v1-models' \
+tools/local-qwen-offline/run-local-qwen.sh
 ```
 
-You can customize the local API address (it must remain loopback):
+OPTIQ_API_KEY is optional. By default, the local backend discovers the model ID using GET /v1/models; if discovery fails, it falls back to mlx-community/Qwen3.5-9B-OptiQ-4bit. Set OPTIQ_MODEL_ID if the ID advertised by your server differs.
 
-```bash
-OPTIQ_BASE_URL='http://127.0.0.1:9163/v1' tools/local-qwen-offline/run-local-qwen.sh
-```
+## What is implemented
 
-## Important scope limitation
+- Native local MAA request routing to OptiQ (no OpenCode process).
+- OpenAI Chat Completions tool calling for local shell commands, file reads, file creation/editing, grep, file glob, and local codebase search.
+- Tool calls are emitted as normal Warp MAA task events so the existing local action UI and approvals handle the actual operation.
+- Computer use requests go through Warp's permission flow. The local model receives approved screenshot bytes through the loopback request, and computer actions are routed through Warp's existing executor.
+- Web search, research agent, orchestration, and cloud-subagent tools are not offered by the local backend.
+- Telemetry event macros do not enqueue in offline mode; the telemetry collector skips flush/persistence and discards queued telemetry.
+- The launcher wraps the process in a macOS Seatbelt policy that denies external network access and allows loopback only.
 
-This patch **does not yet replace Warp's first-party Agent Mode MAA loop with a native in-process OptiQ client**. Warp's native path still constructs requests for the remote `/ai/multi-agent` service. Under this launch profile those requests cannot leave the machine, so the first-party cloud agent will not function offline. Use the OpenCode ACP agent/harness inside Warp for local model-driven work.
+## Important limitations and validation
 
-Likewise, Warp's native Computer Use executor is part of the first-party MAA tool loop. It is not automatically available to an OpenCode ACP turn. A fully native local implementation must explicitly bridge local Qwen tool calls into Warp's existing local action executor and map vision/screenshot payloads; that bridge is not implemented by this support package. Do not treat this prototype as satisfying that requirement.
+This is a first native prototype, not a verified production release. I cannot run the repository's Rust build or macOS desktop/security tests from GitHub's hosted source editor. Run cargo check -p warp --bin warp and the manual test below on the target Mac before relying on it.
 
-`sandbox-exec` is deprecated by Apple. The script fails closed if it is missing and performs network probes before launching, but this repository change has not been built or security-tested on your Mac. For the strongest assurance, additionally monitor/block outbound traffic at the OS firewall and independently verify the process tree.
+The local backend is non-streaming: the model's answer appears after each Chat Completions request finishes. It supports the tools explicitly implemented in local.rs; unsupported Warp tool types are not exposed. Tool results are fed back on the next turn, matching Warp's existing request/action-result lifecycle.
+
+Computer use must be approved in Warp first. This branch does not launch cloud subagents. A model can produce bad tool arguments; the existing Warp tool executor and permission UI must remain enabled, and shell commands/file changes should be reviewed.
+
+The launcher uses macOS sandbox-exec, which Apple has deprecated and may remove in a future macOS release. The script fails closed if the command is absent and checks that OptiQ is reachable locally and an external HTTP probe does not succeed. This is additional containment, not a substitute for a security review. For a strong no-egress guarantee, verify the process tree with a packet capture or outbound firewall rule as well.
+
+## Manual test checklist
+
+1. Start OptiQ, then run the launcher.
+2. Ask the Warp Agent to read a small local file.
+3. Ask it to create a new file; confirm the diff is presented by Warp.
+4. Ask it to run pwd or ls and confirm Warp handles the command.
+5. Request computer control; approve it in Warp, then test a harmless mouse move/screenshot.
+6. With the app still running, disconnect the network. The local Agent should continue working. Web search and cloud agents should be unavailable.
+7. Confirm an external connection attempt is blocked by the Seatbelt profile.
+
+A build/test failure or a missing tool mapping should be fixed before using this on proprietary repositories.
