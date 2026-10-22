@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROFILE_TEMPLATE="$ROOT/tools/local-qwen-offline/offline.sb"
-APP_BIN="${WARP_BIN:-$ROOT/target/debug/warp}"
+APP_BIN="${WARP_BIN:-$ROOT/target/debug/warp-oss}"
 RAW_OPTIQ_BASE_URL="${OPTIQ_BASE_URL:-http://127.0.0.1:9163/v1}"
 
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -12,7 +12,7 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 command -v sandbox-exec >/dev/null 2>&1 || fail "sandbox-exec is unavailable; refusing to launch without an OS network sandbox."
 command -v curl >/dev/null 2>&1 || fail "curl is required."
 command -v python3 >/dev/null 2>&1 || fail "python3 is required."
-[[ -x "$APP_BIN" ]] || fail "Warp binary not found at $APP_BIN. Build first with: cargo build --offline -p warp --bin warp"
+[[ -x "$APP_BIN" ]] || fail "Warp binary not found at $APP_BIN. Build first with: cargo build --offline -p warp --bin warp-oss"
 
 # Parse the endpoint structurally; never rely on a string-prefix check, which could
 # accidentally accept a URL with userinfo (127.0.0.1:port@external.example).
