@@ -1142,7 +1142,8 @@ impl LLMPreferences {
     ) -> impl Iterator<Item = &'a LLMInfo> + use<'a> {
         let routers_enabled = FeatureFlag::CustomModelRouters.is_enabled();
         let local_only = warp_core::telemetry::is_local_offline_mode();
-        std::iter::once(local_qwen_llm_info())
+        let local_model: &'a LLMInfo = local_qwen_llm_info();
+        std::iter::once(local_model)
             .filter(move |_| local_only)
             .chain(
                 UserWorkspaces::as_ref(app)
