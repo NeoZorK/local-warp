@@ -1,7 +1,7 @@
 ; Strict macOS Seatbelt network policy for native local Qwen mode.
-; Only outbound IPv4 loopback is allowed, for the local MLX OptiQ HTTP endpoint.
-; External TCP/UDP, DNS, inbound network, and Unix-domain socket networking are denied.
+; Exactly one outbound destination is allowed: IPv4 loopback at the configured OptiQ port.
+; External TCP/UDP, DNS, inbound network, and all other outbound destinations are denied.
 (version 1)
 (allow default)
 (deny network*)
-(allow network-outbound (remote ip "127.0.0.1:*"))
+(allow network-outbound (remote ip "127.0.0.1:OPTIQ_PORT_PLACEHOLDER"))
