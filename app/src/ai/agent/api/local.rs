@@ -34,9 +34,15 @@ const MAX_TOTAL_TOOL_CALLS: usize = 96;
 
 type LocalActionResultSender = async_channel::Sender<Arc<AIAgentActionResult>>;
 
+#[derive(Clone)]
+struct LocalActionResultRegistration {
+    token: Uuid,
+    sender: LocalActionResultSender,
+}
+
 fn local_action_result_registry(
-) -> &'static parking_lot::Mutex<HashMap<String, LocalActionResultSender>> {
-    static REGISTRY: OnceLock<parking_lot::Mutex<HashMap<String, LocalActionResultSender>>> =
+) -> &'static parking_lot::Mutex<HashMap<String, LocalActionResultRegistration>> {
+    static REGISTRY: OnceLock<parking_lot::Mutex<HashMap<String, LocalActionResultRegistration>>> =
         OnceLock::new();
     REGISTRY.get_or_init(|| parking_lot::Mutex::new(HashMap::new()))
 }
@@ -48,7 +54,10 @@ pub(crate) fn forward_local_action_result(result: Arc<AIAgentActionResult>) {
         return;
     }
     let task_id = result.task_id.to_string();
-    let sender = local_action_result_registry().lock().get(&task_id).cloned();
+    let sender = local_action_result_registry()
+        .lock()
+        .get(&task_id)
+        .map(|registration| registration.sender.clone());
     if let Some(sender) = sender {
         let _ = sender.try_send(result);
     }
@@ -56,11 +65,18 @@ pub(crate) fn forward_local_action_result(result: Arc<AIAgentActionResult>) {
 
 struct LocalFeedbackRegistration {
     task_id: String,
+    token: Uuid,
 }
 
 impl Drop for LocalFeedbackRegistration {
     fn drop(&mut self) {
-        local_action_result_registry().lock().remove(&self.task_id);
+        let mut registry = local_action_result_registry().lock();
+        if registry
+            .get(&self.task_id)
+            .is_some_and(|registration| registration.token == self.token)
+        {
+            registry.remove(&self.task_id);
+        }
     }
 }
 
@@ -68,11 +84,14 @@ fn register_local_action_results(
     task_id: &str,
     sender: LocalActionResultSender,
 ) -> LocalFeedbackRegistration {
-    local_action_result_registry()
-        .lock()
-        .insert(task_id.to_owned(), sender);
+    let token = Uuid::new_v4();
+    local_action_result_registry().lock().insert(
+        task_id.to_owned(),
+        LocalActionResultRegistration { token, sender },
+    );
     LocalFeedbackRegistration {
         task_id: task_id.to_owned(),
+        token,
     }
 }
 
