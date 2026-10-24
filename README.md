@@ -8,6 +8,14 @@ An independent macOS-focused fork of the open-source Warp terminal client, being
 
 **Experimental — not yet validated as a stable release.** The local Agent prototype exists, but the repository still contains substantial upstream cloud/account code and dependencies. Do not assume that a build is fully offline until the validation checklist below passes on the target Mac.
 
+### What exists today
+
+- A native local Qwen/OptiQ Agent prototype and a macOS sandbox launcher are present in the branch.
+- **The Apple Foundation Models provider is not implemented yet.** It is a planned second local provider, not a working feature in the current prototype.
+- The current source still contains the upstream account, billing, referrals, cloud sync/Drive, telemetry, update and hosted-agent surfaces. The light-refactor branch documents and measures their removal; it has not removed them all yet.
+- Local MCP and codebase indexing are intended to be retained, but they still need runtime-network and offline smoke tests.
+- A macOS CI compile check is running for this refactor branch. No successful build claim is made until that check completes.
+
 ## Intended scope
 
 - Native macOS terminal, tabs, command blocks, shell execution, and local settings.
