@@ -1,0 +1,33 @@
+name: Local light macOS compile check
+
+on:
+  push:
+    branches:
+      - light-audit-phase1
+  pull_request:
+    branches:
+      - light-audit-phase1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-light-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Check out source and LFS assets
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          lfs: true
+          fetch-depth: 1
+
+      - name: Install only the pinned minimal Rust toolchain
+        run: rustup toolchain install 1.92.0 --profile minimal
+
+      - name: Compile the existing OSS GUI binary
+        run: rustup run 1.92.0 cargo check --locked -p warp@0.1.0 --bin warp-oss
