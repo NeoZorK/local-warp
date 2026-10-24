@@ -20,11 +20,13 @@ An independent macOS-focused fork of the open-source Warp terminal client, being
 
 The current prototype expects OptiQ at `http://127.0.0.1:9163/v1` by default. Start OptiQ separately and check its `/v1/models` endpoint before testing.
 
-From a checkout with all Rust dependencies already cached:
+From a checkout with Rust 1.92.0 already installed and all dependencies cached, run the minimal offline build helper:
 
 ```bash
-WARP_LOCAL_OFFLINE=1 cargo run --offline -p warp --bin warp-oss
+bash tools/local-qwen-offline/build-local.sh
 ```
+
+This only builds the binary. It does not install dependencies, bundle a `.app`, or launch without the network sandbox. The resulting binary is `target/debug/warp-oss`.
 
 The current native local Agent launcher and sandbox profile are experimental. See [the prototype notes](tools/local-qwen-offline/README.md). Do not use the app for sensitive work until the build, network containment, local tool permissions, and no-egress checks have passed on the target machine.
 
