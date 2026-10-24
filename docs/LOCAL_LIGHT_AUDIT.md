@@ -82,7 +82,26 @@ These are strong candidates based on workspace dependency names and the product 
 
 **AWS SDK dependencies:** do not remove individual `aws-*` packages by hand. They are transitive; first use `cargo tree --offline -i aws-config` (and the exact package names reported by Cargo) to identify which remaining crate pulls them in. Removing the cloud dependency root should remove the SDK transitively if no other feature needs it.
 
-## 4. Build-tool simplification
+## 4. Concrete UI and service entry points found
+
+These files exist in the current source tree. They are the first places to audit when removing the associated feature; this list is an inventory, not a claim that the modules have already been deleted.
+
+| User-facing feature/service | Main source paths found | Safe removal strategy |
+|---|---|---|
+| Billing & Usage / purchases | `app/src/settings_view/billing_and_usage_dispatch.rs`, `app/src/settings_view/billing_and_usage_page.rs`, `app/src/settings_view/billing_and_usage_page_v2.rs`, `app/src/billing/`, `crates/graphql/src/api/billing.rs` | Remove navigation, views, account/usage models and server operations together; keep local model configuration/settings. |
+| Referrals | `app/src/settings_view/referrals_page.rs`, `app/src/server/server_api/referral.rs`, `app/src/referral_theme_status.rs`, referral GraphQL mutations/queries | Remove UI, invitation-email validation/sending and referral API calls as one feature. |
+| Teams and workspaces | `app/src/settings_view/teams_page.rs`, `app/src/settings_view/join_teams_modal.rs`, `app/src/server/server_api/team.rs`, `app/src/server/server_api/workspace.rs`, `app/src/server/team_scope.rs`, `app/src/workspaces/` | First make the app run with a local profile that does not require a team scope; preserve local workspace/tab/session state. |
+| Warp Drive / cloud objects | `app/src/settings_view/warp_drive_page.rs`, `app/src/server/cloud_objects/`, `crates/cloud_objects/`, `crates/cloud_object_client/`, `crates/cloud_object_persistence/` | Remove cloud sync/listeners and cloud-object UI; retain local persistence and terminal command blocks. |
+| Account and sign-in | `app/src/server/server_api/auth.rs`, `app/src/auth/`, `app/src/settings_view/mod.rs` Account section | Replace login-gated feature predicates with explicit local-mode availability; do not just hide the account page while background auth continues. |
+| Telemetry / crash reports | `app/src/server/telemetry/`, `app/src/server/telemetry/collector.rs`, `app/src/crash_reporting/`, `crates/warp_core/src/telemetry.rs` | Keep local logs and diagnostics; remove queue persistence, network flush, Sentry/minidump upload and any background initialization. |
+| Automatic updates / online changelog | `app/src/autoupdate/`, `app/src/settings/tui_autoupdate.rs` | Disable the polling/downloading path and remove UI affordances; local builds can be updated by manually replacing the app. |
+| Hosted agent / Claude and cloud providers | `app/src/ai/agent_sdk/driver/cloud_provider.rs`, `app/src/ai/agent_sdk/driver/cloud_provider/aws.rs`, `app/src/ai/agent_sdk/driver/cloud_provider/gcp.rs`, `app/src/ai/agent_sdk/driver/harness/claude_code.rs`, `app/src/ai/agent/api/impl.rs` | Keep the local OptiQ path and shared tool execution; remove hosted provider/harness branches after local tests pass. |
+| Settings navigation / shared blocks | `app/src/settings_view/mod.rs`, `app/src/settings_view/settings_page.rs`, `app/src/settings_view/shared_blocks_page.rs` if present | Remove cloud sharing/navigation but keep generic command-block UI, keybindings and local settings. Confirm actual file presence before changing the path. |
+| External network transports | `crates/http_client/`, `crates/websocket/`, GraphQL and Firebase clients | Remove service callers first. Keep a small loopback-only HTTP path for OptiQ and local MCP where needed. |
+
+The central settings registry currently imports Billing & Usage, Referrals, Teams and Warp Drive views from `app/src/settings_view/mod.rs`. That registry should be edited before deleting those modules, otherwise compilation will fail with unresolved imports. Account/auth state is used in other features, so removing only the visible login modal is not enough to eliminate account coupling.
+
+## 5. Build-tool simplification
 
 - Keep `rust-toolchain.toml` pinned at Rust `1.92.0` until the project is known to build with a different version. Avoid installing both an arbitrary latest stable and the pinned toolchain.
 - `rustfmt`, `clippy`, and `rust-analyzer` are declared in the toolchain file. `rust-analyzer` is for editor integration, not compilation; remove it from the automatic setup path, not necessarily from the developer toolchain declaration. Run formatting/lint only when requested.
@@ -90,7 +109,7 @@ These are strong candidates based on workspace dependency names and the product 
 - Do not download or install the Qwen model as part of this build. OptiQ and the model are already managed separately by the user.
 - Do not run `cargo fetch` or any non-offline Cargo command during an audit. If the dependency cache is incomplete, report exactly which packages are missing and stop; don't silently start a large download.
 
-## 5. Required sequence (one logical change per commit)
+## 6. Required sequence (one logical change per commit)
 
 1. Fix the compile blocker in the HTTP SSE denial path; build/check without deleting features.
 2. Capture the dependency tree and size baseline using `tools/local-qwen-offline/audit-light.sh`.
@@ -102,7 +121,7 @@ These are strong candidates based on workspace dependency names and the product 
 8. Rebuild and compare `.app` size, executable size, `target/` size, number of unique crates, and number of network-capable code paths.
 9. Generate/update third-party license inventory after dependency changes.
 
-## 6. Acceptance checks before calling it stable
+## 7. Acceptance checks before calling it stable
 
 - [ ] `cargo build --offline -p warp --bin warp-oss` succeeds on the target Mac.
 - [ ] App launches without login or email registration.
@@ -115,6 +134,6 @@ These are strong candidates based on workspace dependency names and the product 
 - [ ] A packet/log audit shows no app-managed non-loopback requests during launch, idle, indexing, agent execution and shutdown.
 - [ ] License inventory and notices still pass after removals.
 
-## 7. Measurements not yet available
+## 8. Measurements not yet available
 
 The current prototype has not produced a successful final `.app` in the reported install attempt. Therefore no honest before/after app-size reduction or final crate-removal count can be stated yet. The audit script records what can be measured from the local checkout without downloading dependencies.
