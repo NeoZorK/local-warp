@@ -174,7 +174,8 @@ fn resolve_mcp_specs_to_json_skips_preview_urls_without_ambient_task() {
             &foreground,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .configs;
 
         let server_root = ChannelState::server_root_url();
         assert_eq!(
@@ -221,7 +222,8 @@ fn resolve_mcp_specs_to_json_attaches_factory_and_preserves_explicit_specs() {
             &foreground,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .configs;
 
         assert_eq!(resolved.len(), 2);
         assert_eq!(
@@ -279,7 +281,8 @@ fn resolve_mcp_specs_to_json_skips_factory_when_flag_disabled() {
             &foreground,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .configs;
 
         assert_eq!(
             resolved,
@@ -314,7 +317,8 @@ fn resolve_mcp_specs_to_json_skips_factory_without_credentials() {
             &foreground,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .configs;
 
         assert_eq!(
             resolved,
@@ -350,7 +354,8 @@ fn resolve_mcp_specs_to_json_preserves_exact_name_collision() {
             &foreground,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .configs;
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(
@@ -385,7 +390,9 @@ fn render_installations(
     installations: Vec<TemplatableMCPServerInstallation>,
     secrets: HashMap<String, ManagedSecretValue>,
 ) -> HashMap<String, JSONMCPServer> {
-    AgentDriver::mcp_installations_to_json(installations, &secrets).unwrap()
+    AgentDriver::mcp_installations_to_json(installations, &secrets)
+        .unwrap()
+        .configs
 }
 
 #[test]
@@ -429,6 +436,15 @@ fn managed_resolver_non_local_uuid_calls_managed_client() {
 
     assert!(resolved.local_uuids.is_empty());
     assert_eq!(resolved.ephemeral_installations.len(), 1);
+    let rendered = AgentDriver::mcp_installations_to_json(
+        resolved.ephemeral_installations,
+        &HashMap::from([("API_TOKEN".to_string(), raw_secret("token"))]),
+    )
+    .unwrap();
+    assert_eq!(
+        rendered.warp_ids,
+        HashMap::from([("GitHub MCP".to_string(), uuid.to_string())])
+    );
 }
 
 #[test]
@@ -1165,8 +1181,9 @@ fn builtin_preview_urls_mcp_for_oz_attaches_when_eligible() {
         installation.templatable_mcp_server().name,
         PREVIEW_URLS_MCP_SERVER_NAME
     );
-    let resolved =
-        AgentDriver::mcp_installations_to_json(vec![installation], &HashMap::new()).unwrap();
+    let resolved = AgentDriver::mcp_installations_to_json(vec![installation], &HashMap::new())
+        .unwrap()
+        .configs;
     let JSONTransportType::SSEServer { headers, .. } =
         &resolved[PREVIEW_URLS_MCP_SERVER_NAME].transport_type
     else {

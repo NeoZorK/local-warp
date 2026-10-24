@@ -904,6 +904,7 @@ fn split_run_options(
 
 /// The workspace setup a standby sandbox completed before its assignment arrived.
 pub(crate) struct StandbyWorkspace {
+    pub harness: Harness,
     /// What was prepared. An assignment is accepted only when its own workspace matches this.
     pub configuration: environment::WorkspaceConfiguration,
     /// Repositories to scan for skills, carried over from the preparation.
@@ -3112,10 +3113,10 @@ impl AgentDriver {
         let resolved_mcp_servers =
             Self::resolve_mcp_specs_to_json(&mcp_specs, secrets, managed_mcp_client, foreground)
                 .await?;
-        if !resolved_mcp_servers.is_empty() {
+        if !resolved_mcp_servers.configs.is_empty() {
             log::info!(
                 "Resolved {} MCP server(s) for third-party harness",
-                resolved_mcp_servers.len()
+                resolved_mcp_servers.configs.len()
             );
         }
 
