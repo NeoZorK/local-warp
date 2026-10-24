@@ -570,13 +570,20 @@ impl<'a> RequestBuilder<'a> {
                 .is_some_and(|request| is_allowed_local_offline_url(request.url()));
             if !allowed {
                 log::warn!("Blocked outbound SSE request in local offline mode");
-                return cfg_if::cfg_if! {
-                    if #[cfg(target_family = "wasm")] {
-                        futures::stream::empty::<Result<reqwest_eventsource::Event, reqwest_eventsource::Error>>().boxed_local()
-                    } else {
-                        futures::stream::empty::<Result<reqwest_eventsource::Event, reqwest_eventsource::Error>>().boxed()
-                    }
-                };
+                #[cfg(target_family = "wasm")]
+                {
+                    return futures::stream::empty::<
+                        Result<reqwest_eventsource::Event, reqwest_eventsource::Error>,
+                    >()
+                    .boxed_local();
+                }
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    return futures::stream::empty::<
+                        Result<reqwest_eventsource::Event, reqwest_eventsource::Error>,
+                    >()
+                    .boxed();
+                }
             }
         }
         cfg_if::cfg_if! {
