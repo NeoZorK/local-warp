@@ -6,14 +6,22 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "ERROR: cargo is not installed. This audit script will not install it." >&2
+if ! command -v rustup >/dev/null 2>&1; then
+  echo "ERROR: rustup is missing. This audit script will not install Rust." >&2
   exit 127
+fi
+if ! rustup toolchain list | grep -Eq '^1\\.92\\.0([ -]|$)'; then
+  echo "ERROR: pinned Rust 1.92.0 is not installed; stopping before calling any rustup shim." >&2
+  echo "Install it explicitly only if you choose to allow the download:" >&2
+  echo "  rustup toolchain install 1.92.0 --profile minimal" >&2
+  exit 2
 fi
 if ! command -v git >/dev/null 2>&1; then
   echo "ERROR: git is not installed." >&2
   exit 127
 fi
+cargo_cmd() { rustup run 1.92.0 cargo "$@"; }
+rustc_cmd() { rustup run 1.92.0 rustc "$@"; }
 
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 OUT="$ROOT/audit/local-light-$STAMP"
@@ -36,8 +44,8 @@ run_capture() {
   echo "timestamp=$STAMP"
   echo "branch=$(git branch --show-current 2>/dev/null || true)"
   echo "commit=$(git rev-parse HEAD 2>/dev/null || true)"
-  echo "rustc=$(rustc --version 2>&1 || true)"
-  echo "cargo=$(cargo --version 2>&1 || true)"
+  echo "rustc=$(rustc_cmd --version 2>&1 || true)"
+  echo "cargo=$(cargo_cmd --version 2>&1 || true)"
   echo "macOS=$(sw_vers -productVersion 2>/dev/null || true)"
   echo "architecture=$(uname -m)"
   echo
@@ -45,15 +53,15 @@ run_capture() {
   git status --short
 } > "$OUT/environment.txt"
 
-run_capture cargo-tree-normal cargo tree --offline -p warp@0.1.0 --edges normal
-run_capture cargo-tree-features cargo tree --offline -p warp@0.1.0 --edges features
-run_capture cargo-tree-duplicates cargo tree --offline -p warp@0.1.0 --duplicates
-run_capture cargo-metadata cargo metadata --offline --format-version 1 --no-deps
+run_capture cargo-tree-normal cargo_cmd tree --offline -p warp@0.1.0 --edges normal
+run_capture cargo-tree-features cargo_cmd tree --offline -p warp@0.1.0 --edges features
+run_capture cargo-tree-duplicates cargo_cmd tree --offline -p warp@0.1.0 --duplicates
+run_capture cargo-metadata cargo_cmd metadata --offline --format-version 1 --no-deps
 
 # Reverse-dependency probes are best-effort: a missing package is recorded, not installed.
 for package in aws-config aws-sdk-sts aws-sdk-sso aws-sdk-ssooidc aws-sdk-signin sentry opentelemetry-otlp; do
   safe_name="$(printf '%s' "$package" | tr -c '[:alnum:]_.-' '_')"
-  run_capture "reverse-$safe_name" cargo tree --offline -p warp@0.1.0 --invert "$package"
+  run_capture "reverse-$safe_name" cargo_cmd tree --offline -p warp@0.1.0 --invert "$package"
 done
 
 {
