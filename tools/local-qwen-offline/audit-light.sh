@@ -10,7 +10,7 @@ if ! command -v rustup >/dev/null 2>&1; then
   echo "ERROR: rustup is missing. This audit script will not install Rust." >&2
   exit 127
 fi
-if ! rustup toolchain list | grep -Eq '^1\\.92\\.0([ -]|$)'; then
+if ! rustup toolchain list | grep -Eq '^1\.92\.0([ -]|$)'; then
   echo "ERROR: pinned Rust 1.92.0 is not installed; stopping before calling any rustup shim." >&2
   echo "Install it explicitly only if you choose to allow the download:" >&2
   echo "  rustup toolchain install 1.92.0 --profile minimal" >&2
