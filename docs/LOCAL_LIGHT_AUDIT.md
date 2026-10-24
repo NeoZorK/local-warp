@@ -6,6 +6,36 @@
 
 This document separates observed source structure from planned removals. A crate is not safe to delete just because its name looks cloud-related: first inspect reverse dependencies and feature gates, then remove references, compile, and test.
 
+## 0. Change inventory and exact rollback anchors
+
+The local-Qwen prototype was added in a sequence of small commits on 2026-10-22. These are the feature groups currently present in the branch:
+
+| Date (UTC) | Commit(s) | What was added or changed |
+|---|---|---|
+| 2026-10-22 21:33 | `5d1f3501b97b`, `14da4c88516b`, `0ce859c073cf` | Native in-process OptiQ Agent backend; register it and route Agent Mode to local OptiQ in offline mode. |
+| 2026-10-22 21:33–21:35 | `767ccf2e304c`, `f3c4b5492967`, `7e27b96f87a0`, `f35a1c19196b`, `311d1d8fec80` | Remove unrelated OpenCode ACP wiring; use a direct native launcher; document prototype; harden endpoint validation and OptiQ compatibility. |
+| 2026-10-22 21:40–21:43 | `0887559a3d85`, `66d1b893dab0`, `234bf1f4e8a1`, `85b81561f95e`, `4fdd8ae23eef`, `73e43651a488`, `a88c03559a92`, `09f2afcce2d2`, `3ed69d635c93`, `0b9e24274a6f`, `04f60c2ffa6c` | Local Qwen model metadata and picker; local model labels; loopback endpoint restrictions; local-only model selection; context formatting and iterator fixes. |
+| 2026-10-22 21:45–21:47 | `cfcff4b96b89`, `b5a058c47aab`, `fc274bf49c9a`, `ac02069107f5`, `b865654f9e14`, `d8ff2fd5e23a` | Block non-OptiQ HTTP/SSE; restrict sandbox to OptiQ's port; scope computer-use approvals to the task; disable redirects in offline mode; disallow remote terminal sessions for local Agent. |
+| 2026-10-22 21:52–21:54 | `a8e6f1ac469b`, `8f4cc4420170`, `e574bf75df5f`, `bbd52e153e85`, `298762b23e2e`, `6fd938fd181f` | Iterative local tool loop and action-result feedback so the model can receive completed tool results and continue. |
+| 2026-10-22 21:54–22:02 | `faaff3b5e4bf`, `b7fcc3a0a720`, `0cf631cd7c8b`, `4b0e8c59cab2`, `95f48016e06d`, `fe189df9d689`, `2de3c743fd61`, `d0f8aaba8b1a`, `f883cc715a1a` | Computer-use input validation and history bounds; OSS launch target; avoid duplicate cloud-style follow-ups; avoid stale stream cleanup bugs. |
+| 2026-10-22 22:06–22:10 | `f46ac9e1fee8`, `46b5b931f6ee`, `2ed2b01dd222`, `505b6e3fa3fa`, `15087fff5dd4`, `68939ad20696` | Further computer-use/offline-sandbox safeguards, tool-call ordering and pending-result cleanup. |
+| 2026-10-23 12:43 | `5acb2066d80b` | Gitleaks secret-scanning workflow for this branch. |
+| 2026-10-24 12:20–12:22 | `65f1d3bb6216`, `1f662918a4ce`, `2e602331f9d6`, `3d324d95f75b`, `b4d4242e89be`, `eb306287ca6c`, `7bdc0abcac53`, `448ea2741603` | Current light-refactor phase: narrow compile fix; independent README; this audit; read-only dependency inventory; minimal pinned toolchain; offline build helper; macOS compile-check workflow. |
+
+### Rollback points
+
+- **Current local-Qwen prototype before the light refactor:** `5acb2066d80b74c173d25cefcea4d319e904dae9`.
+- **Immediately before the local-Qwen feature was introduced:** `6b9c6a8cc70a19ccfc0f1259aca0f521bb6b3d25` (parent of the first local Agent commit `5d1f3501b97b`).
+- **Current light-refactor work:** branch `light-audit-phase1`, latest compile-check workflow commit `448ea274160381dc10eb86bd252bdcd638f3d6bb`.
+
+To inspect the pre-local baseline without changing the current checkout, create a separate branch/worktree from the exact commit:
+
+```bash
+git switch -c inspect/pre-local-qwen 6b9c6a8cc70a19ccfc0f1259aca0f521bb6b3d25
+```
+
+To return to the full local-Qwen prototype, switch to `local-qwen-offline-prototype`. To continue the current audit/refactor, switch to `light-audit-phase1`. Prefer switching branches over `reset --hard` or force-pushing. The local-Qwen additions are interdependent; do not revert one middle commit in isolation without rebuilding and testing.
+
 ## 1. Current known blocker
 
 In `crates/http_client/src/lib.rs`, the offline SSE-denial branch used `cfg_if!` as an expression to return target-specific boxed streams. The compiler log reported a macro-position/type mismatch there. Phase 1 replaces that return expression with target-specific `#[cfg]` blocks. This is a narrow source fix; it is **not yet verified by a native macOS build**.
